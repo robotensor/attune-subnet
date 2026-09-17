@@ -2,7 +2,7 @@
 
 import pytest
 
-from robotensor_subnet.protocol import commitment
+from robotensor_subnet.protocol import commitment, seed
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
 
@@ -44,3 +44,12 @@ def test_what_cannot_be_a_commitment_is_refused(repo, revision):
 def test_what_is_not_a_vector_commitment_does_not_parse(data):
     with pytest.raises(commitment.CommitmentError):
         commitment.parse(data)
+
+
+def test_the_seed_block_comes_after_the_commitment_and_behind_the_head():
+    assert seed.seed_block(100, 90) == 97
+    with pytest.raises(seed.NotYet):
+        seed.seed_block(92, 90)  # 89 is not after 90
+    assert seed.normalize_hash("AB" * 32) == "0x" + "ab" * 32
+    with pytest.raises(ValueError):
+        seed.normalize_hash("0x1234")

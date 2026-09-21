@@ -1,0 +1,30 @@
+# The localnet rehearsal: scripts/localnet.sh up, then scripts/localnet_setup.py (writes netuid).
+[chain]
+network = "ws://127.0.0.1:9944"
+netuid = 2
+
+[validator]
+wallet_name = "owner"
+wallet_hotkey = "default"
+wallet_path = "var/wallets"
+state = "var/localnet/validator-state.json"
+# Fast blocks (250 ms): a weights interval of 100 blocks is 25 s.
+weights_interval_blocks = 100
+# Empty: the subnet owner's hotkey (uid 0) takes what no lane claims.
+burn_hotkey = ""
+
+[lanes.vector]
+share = 0.30
+spec = "/root/robotensor/vector/ICIL-competition-orchestrator/specs/vector_l1.json"
+store = "var/localnet/vector/store"
+key = "var/localnet/vector-keys/orchestrator.ed25519"
+run_dir = "var/localnet/vector/runs"
+cache = "var/vector-cache"
+policy_python = "/root/robotensor/.venvs/vector-policy/bin/python"
+simulator_python = "/root/robotensor/.venvs/robotwin-icil/bin/python"
+# The rehearsal plays 48 units a side (3 per task): enough for the sign test to call a clear win.
+duel_size = "light"
+genesis_revision = ""
+private_window_blocks = 1200
+policy_kwargs = { device = "cuda:0" }
+mirror = ""

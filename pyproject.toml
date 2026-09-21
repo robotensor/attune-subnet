@@ -18,6 +18,9 @@ dependencies = ["bittensor==10.5.0", "huggingface_hub>=1.0"]
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff==0.16.7"]
 
+[project.scripts]
+robotensor-miner = "robotensor_subnet.miner:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/robotensor_subnet"]
 

@@ -29,6 +29,9 @@ class VectorConfig:
     policy_kwargs: dict[str, str] = field(default_factory=dict)
     #: A Hugging Face dataset the signed store is mirrored to; empty for none.
     mirror: str = ""
+    #: Units materialized and played at once, each a simulator and a policy server of its own
+    #: (about 9 GB of GPU memory each).
+    workers: int = 1
 
 
 @dataclass(frozen=True)
@@ -77,6 +80,7 @@ def load(path: str | os.PathLike[str]) -> Config:
         private_window_blocks=int(lane.get("private_window_blocks", 300)),
         policy_kwargs={str(k): str(v) for k, v in (lane.get("policy_kwargs") or {}).items()},
         mirror=str(lane.get("mirror", "")),
+        workers=int(lane.get("workers", 1)),
     )
     total = sum([vector.share])
     if not 0 <= total <= 1:

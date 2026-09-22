@@ -28,5 +28,7 @@ duel_size = "launch"
 genesis_revision = ""
 private_window_blocks = 300
 policy_kwargs = { device = "cuda:0" }
+# Units at once: each is a simulator (~6 GB) and a policy server (~3 GB) on the GPU.
+workers = 6
 # A Hugging Face dataset the signed store is published to, for the dashboard; empty for none.
 mirror = ""

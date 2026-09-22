@@ -110,7 +110,9 @@ class VectorLane:
             from icil_orchestrator.store.mirror import Mirror
 
             mirror = Mirror(store.root, self.cfg.mirror, token=os.environ.get("HF_TOKEN"))
-        return Orchestrator(spec, store, runtime, self.cfg.run_dir, mirror=mirror)
+        return Orchestrator(
+            spec, store, runtime, self.cfg.run_dir, mirror=mirror, workers=self.cfg.workers
+        )
 
     @property
     def spec(self) -> Any:

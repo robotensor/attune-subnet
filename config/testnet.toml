@@ -28,7 +28,8 @@ duel_size = "launch"
 genesis_revision = ""
 private_window_blocks = 300
 policy_kwargs = { device = "cuda:0" }
-# Units at once: each is a simulator (~6 GB) and a policy server (~3 GB) on the GPU.
-workers = 6
+# Units at once: each is a simulator (~6 GB) and a policy server (~3 GB) on the GPU. Measured on
+# one RTX PRO 6000: 3 at once give 1.5x the throughput of 1, 5 give 1.7x; the CPU and GPU saturate.
+workers = 4
 # A Hugging Face dataset the signed store is published to, for the dashboard; empty for none.
 mirror = ""

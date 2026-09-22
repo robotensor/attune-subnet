@@ -20,6 +20,7 @@ dev = ["pytest>=8", "ruff==0.16.7"]
 
 [project.scripts]
 robotensor-miner = "robotensor_subnet.miner:main"
+robotensor-validator = "robotensor_subnet.validator:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/robotensor_subnet"]

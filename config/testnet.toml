@@ -20,7 +20,7 @@ spec = "/root/robotensor/vector/ICIL-competition-orchestrator/specs/vector_l1.js
 store = "var/testnet/vector/store"
 key = "var/testnet/vector-keys/orchestrator.ed25519"
 run_dir = "var/testnet/vector/runs"
-cache = "var/vector-cache"
+cache = "/root/robotensor/.cache/weights"
 policy_python = "/root/robotensor/.venvs/vector-policy/bin/python"
 simulator_python = "/root/robotensor/.venvs/robotwin-icil/bin/python"
 # The launch size: 160 units a side, 10 per task (the spec's default).

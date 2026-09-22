@@ -42,7 +42,7 @@ def inspect(
         RevisionNotFoundError,
     )
 
-    api = api or HfApi(token=token)
+    api = api or HfApi(token=token or None)  # an empty token is no token
     try:
         info = api.model_info(repo, revision=revision, files_metadata=True)
     except (RepositoryNotFoundError, RevisionNotFoundError, GatedRepoError) as exc:
@@ -82,7 +82,7 @@ def upload_weights(
     the repository if needed; the commit sha of the upload."""
     from huggingface_hub import CommitOperationAdd, HfApi
 
-    api = HfApi(token=token)
+    api = HfApi(token=token or None)
     api.create_repo(repo, repo_type="model", private=private, exist_ok=True)
     operations = [CommitOperationAdd(path_in_repo=WEIGHTS_FILE, path_or_fileobj=weights)]
     if readme is not None:

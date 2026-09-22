@@ -258,10 +258,28 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _logging() -> None:
+    """Our loggers with a handler of their own. Importing bittensor sets every logger that exists
+    then to CRITICAL, which would hide every line of the loop's progress, so it is imported first
+    and our loggers are put back after it."""
+    import bittensor  # noqa: F401 - for its logging setup, before ours
+
+    for name, logger in list(logging.root.manager.loggerDict.items()):
+        if name.startswith(("robotensor", "icil_orchestrator")) and isinstance(
+            logger, logging.Logger
+        ):
+            logger.setLevel(logging.NOTSET)
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    for name in ("robotensor", "icil_orchestrator"):
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.INFO)
+        logger.handlers[:] = [handler]
+        logger.propagate = False
+
+
 def main(argv: list[str] | None = None) -> int:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
-    )
+    _logging()
     args = build_parser().parse_args(argv)
     cfg = load(args.config)
     return int(args.func(args, cfg) or 0)

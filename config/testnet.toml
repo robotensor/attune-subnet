@@ -1,0 +1,32 @@
+# Testnet: set netuid to the subnet you registered (btcli subnet create --network test), and the
+# wallet to its owner's (or a validator with a permit). Wallets live where btcli keeps them.
+[chain]
+network = "test"
+netuid = 0
+
+[validator]
+wallet_name = "robotensor-owner"
+wallet_hotkey = "default"
+wallet_path = ""
+state = "var/testnet/validator-state.json"
+# 12 s blocks: 360 blocks is one tempo, 72 minutes; the chain's weights rate limit is 100.
+weights_interval_blocks = 360
+# Empty: the subnet owner's hotkey (uid 0) takes what no lane claims.
+burn_hotkey = ""
+
+[lanes.vector]
+share = 0.30
+spec = "/root/robotensor/vector/ICIL-competition-orchestrator/specs/vector_l1.json"
+store = "var/testnet/vector/store"
+key = "var/testnet/vector-keys/orchestrator.ed25519"
+run_dir = "var/testnet/vector/runs"
+cache = "var/vector-cache"
+policy_python = "/root/robotensor/.venvs/vector-policy/bin/python"
+simulator_python = "/root/robotensor/.venvs/robotwin-icil/bin/python"
+# The launch size: 160 units a side, 10 per task (the spec's default).
+duel_size = "launch"
+genesis_revision = ""
+private_window_blocks = 300
+policy_kwargs = { device = "cuda:0" }
+# A Hugging Face dataset the signed store is published to, for the dashboard; empty for none.
+mirror = ""

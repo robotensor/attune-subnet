@@ -1,4 +1,8 @@
 # The localnet rehearsal: scripts/localnet.sh up, then scripts/localnet_setup.py (writes netuid).
+[paths]
+# Everything relative below hangs from here: the repository root, since this file is in config/.
+root = ".."
+
 [chain]
 network = "ws://127.0.0.1:9944"
 netuid = 2
@@ -12,6 +16,9 @@ state = "var/localnet/validator-state"
 weights_interval_blocks = 100
 # Empty: the subnet owner's hotkey (uid 0) takes what no lane claims.
 burn_hotkey = ""
+# Horizon's 70% is not wired in yet, so it burns. Said out loud, because a share that does not add
+# up is otherwise a typo that burns emission quietly.
+burn_remainder = true
 
 [lanes.vector]
 share = 0.30

@@ -48,6 +48,7 @@ def lane(tmp_path):
     if not SPEC.is_file():
         pytest.skip("the orchestrator checkout is not beside this one")
     cfg = VectorConfig(
+        name="vector",
         share=0.3,
         spec=SPEC,
         store=tmp_path / "store",
@@ -58,7 +59,7 @@ def lane(tmp_path):
         simulator_python="python",
         private_window_blocks=10,
     )
-    return VectorLane(cfg, State(tmp_path / "state.json"))
+    return VectorLane(cfg, State(tmp_path / "state"))
 
 
 def c(hotkey, repo, sha, block):

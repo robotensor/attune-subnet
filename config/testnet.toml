@@ -1,5 +1,9 @@
 # Testnet: set netuid to the subnet you registered (btcli subnet create --network test), and the
 # wallet to its owner's (or a validator with a permit). Wallets live where btcli keeps them.
+[paths]
+# Everything relative below hangs from here: the repository root, since this file is in config/.
+root = ".."
+
 [chain]
 network = "test"
 netuid = 0
@@ -13,6 +17,9 @@ state = "var/testnet/validator-state"
 weights_interval_blocks = 360
 # Empty: the subnet owner's hotkey (uid 0) takes what no lane claims.
 burn_hotkey = ""
+# Horizon's 70% is not wired in yet, so it burns. Said out loud, because a share that does not add
+# up is otherwise a typo that burns emission quietly.
+burn_remainder = true
 
 [lanes.vector]
 share = 0.30

@@ -11,7 +11,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class VectorConfig:
-    """The Vector lane: the orchestrator contract and where its signed store and runs live."""
+    """The Vector competition: the orchestrator contract and where its signed store and runs live."""
 
     share: float
     spec: Path

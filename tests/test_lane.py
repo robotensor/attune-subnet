@@ -13,7 +13,7 @@ from robotensor_subnet.state import State
 
 pytest.importorskip("icil_orchestrator")
 
-SPEC = Path("/root/robotensor/vector/ICIL-competition-orchestrator/specs/vector_l1.json")
+SPEC = Path("/root/robotensor/vector/vector-orchestrator/specs/vector_l1.json")
 A, B, C = "a" * 40, "b" * 40, "c" * 40
 
 

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "robotensor-subnet"
 version = "0.1.0"
-description = "The Robotensor Bittensor subnet: miner and validator for the Vector lane (Competition 1)."
+description = "The Robotensor Bittensor subnet: miner and validator for the Vector competition (Competition 1)."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"

@@ -2,7 +2,7 @@
     check    the file against the architecture the validator serves, as the validator checks it
     upload   model.safetensors (and an optional README) to your Hugging Face model repository;
              prints the commit sha to commit
-    commit   write `vector1:<repo>@<sha>` as your hotkey's commitment on the subnet
+    commit   write `vector:<repo>@<sha>` as your hotkey's commitment on the subnet
     status   your hotkey's commitment on chain, and what the Hub shows for it
 
 Order matters for copy protection: upload to a PRIVATE repository, commit the sha on chain, then

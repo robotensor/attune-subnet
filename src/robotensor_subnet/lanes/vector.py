@@ -1,11 +1,11 @@
-"""The Vector lane: chain commitments in, king-of-the-hill duels out, through the ICIL orchestrator.
+"""Robotensor Vector: chain commitments in, king-of-the-hill duels out, through its orchestrator.
 
 This module is the chain's side of the lane and nothing else. The lane engine is
 `icil_orchestrator` (duels, the weights runtime, the signed store), run as a library on the
 `vector_l1` contract (`specs/vector_l1.json` in the orchestrator); the benchmark is the RoboTwin-Vector fork's
 plugin; the model code is `vector_runtime`. What happens here:
 
-**Intake.** Every `vector1:` commitment on chain is read with the block it was made at. A new one is
+**Intake.** Every `vector:` commitment on chain is read with the block it was made at. A new one is
 looked up on the Hub (`hub.inspect`): a repository holding anything but the weights and a README is
 refused; one the Hub does not show yet (still private) waits `private_window_blocks` and is then
 refused; weights byte-identical to an earlier commitment's (same sha256, from the Hub's LFS
@@ -125,7 +125,7 @@ class VectorLane:
     # -- intake -----------------------------------------------------------------------------
 
     def intake(self, commitments: list[Commitment], block: int, *, api: Any = None) -> list[Entry]:
-        """Take every new `vector1:` commitment into the lane; the entries it changed."""
+        """Take every new `vector:` commitment into the lane; the entries it changed."""
         from icil_orchestrator.ids import submission_key
 
         lane = self.state.lane(LANE)
@@ -136,7 +136,7 @@ class VectorLane:
                 sub = commitment_.parse(c.data)
             except commitment_.CommitmentError:
                 continue
-            if sub.lane != commitment_.Vector:
+            if sub.lane != commitment_.VECTOR:
                 continue
             key = submission_key(sub.repo, sub.revision)
             known = entries.get(key)

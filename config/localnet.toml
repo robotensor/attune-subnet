@@ -15,7 +15,7 @@ burn_hotkey = ""
 
 [lanes.vector]
 share = 0.30
-spec = "/root/robotensor/vector/ICIL-competition-orchestrator/specs/vector_l1.json"
+spec = "/root/robotensor/vector/vector-orchestrator/specs/vector_l1.json"
 store = "var/localnet/vector/store"
 key = "var/localnet/vector-keys/orchestrator.ed25519"
 run_dir = "var/localnet/vector/runs"

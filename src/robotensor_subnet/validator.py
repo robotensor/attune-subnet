@@ -8,7 +8,7 @@
     weights  compute the weight vector and set it (--dry-run prints it)
     status   the lanes' queues, champions and kings
 
-The chain is `chain.Chain`, the only bittensor code; the Vector lane is `lanes.vector`.
+The chain is `chain.Chain`, the only bittensor code; the Vector competition is `lanes.vector`.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from typing import Any
 
 from . import chain as chain_
 from .config import Config, load
-from .lanes.vector import VectorLane, Entry
+from .lanes.vector import Entry, VectorLane
 from .protocol import seed as seed_
 from .protocol.weights import Lane, weight_vector
 from .state import State
@@ -52,7 +52,9 @@ def compute_weights(cfg: Config, vector: VectorLane, chain: chain_.Chain) -> dic
     return weight_vector(lanes, uids, uids[burn])
 
 
-def set_weights(cfg: Config, vector: VectorLane, chain: chain_.Chain, wallet: Any) -> dict[int, float]:
+def set_weights(
+    cfg: Config, vector: VectorLane, chain: chain_.Chain, wallet: Any
+) -> dict[int, float]:
     weights = compute_weights(cfg, vector, chain)
     chain.set_weights(wallet, weights)
     return weights

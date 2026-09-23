@@ -1,12 +1,13 @@
 """What a miner writes on chain: one short string naming its submission.
 
-    vector1:<owner>/<name>@<40-hex commit>
+    vector:<owner>/<name>@<40-hex commit>
+    horizon:<owner>/<name>@<40-hex commit>
 
-`vector1` names the lane and the version of this format; a later lane (the Zero-WAM one) takes its own
-prefix, so one subnet reads every lane's commitments from the same storage. The string is stored
-as a raw commitment, which holds at most `MAX_BYTES` bytes, so a repository id can be at most about
-80 characters. The revision is always a full commit sha: a branch would let a miner change what
-was committed after its block, and the block is what orders the queue.
+The first word names the competition the submission enters, so one subnet reads both competitions'
+commitments from the same storage and a miner never has to say which netuid slot they meant. The
+string is stored as a raw commitment, which holds at most `MAX_BYTES` bytes, so a repository id can
+be at most about 80 characters. The revision is always a full commit sha: a branch would let a
+miner change what was committed after its block, and the block is what orders the queue.
 """
 
 from __future__ import annotations
@@ -16,9 +17,11 @@ from dataclasses import dataclass
 
 #: A raw commitment's limit on chain (`Raw` data, as `Subtensor.set_commitment` writes it).
 MAX_BYTES = 128
-#: The Vector lane's prefix, and the only lane live at launch.
-Vector = "vector1"
-LANES = (Vector,)
+#: Competition 1, action-grounded in-context learning: the only one live at launch.
+VECTOR = "vector"
+#: Competition 2, video-prompted world-action learning; wired but not yet open.
+HORIZON = "horizon"
+LANES = (VECTOR,)
 
 REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
 SHA_RE = re.compile(r"[0-9a-f]{40}")
@@ -41,7 +44,7 @@ class Submission:
         return f"{self.repo}@{self.revision}"
 
 
-def encode(repo: str, revision: str, lane: str = Vector) -> str:
+def encode(repo: str, revision: str, lane: str = VECTOR) -> str:
     """The commitment string for `repo@revision`; `CommitmentError` if it cannot be one."""
     if lane not in LANES:
         raise CommitmentError(f"unknown lane {lane!r}; this subnet reads {', '.join(LANES)}")

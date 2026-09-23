@@ -24,9 +24,10 @@ from typing import Any
 
 from . import chain as chain_
 from .config import Config, load
+from .lanes.base import FAILED, Progress
 from .lanes.vector import Entry, VectorLane
 from .protocol import seed as seed_
-from .protocol.weights import Lane, weight_vector
+from .protocol import weights as weights_
 from .state import State
 
 log = logging.getLogger("robotensor.validator")
@@ -48,8 +49,13 @@ def compute_weights(cfg: Config, vector: VectorLane, chain: chain_.Chain) -> dic
     burn = cfg.burn_hotkey or chain.owner_hotkey()
     if burn not in uids:
         raise RuntimeError(f"the burn hotkey {burn} is not registered on netuid {cfg.netuid}")
-    lanes = [Lane("vector", cfg.vector.share, vector.champions())]
-    return weight_vector(lanes, uids, uids[burn])
+    award = vector.award()
+    lanes = [
+        weights_.Lane(
+            vector.name, cfg.vector.share, award.entries, entries=award.keep, decay=award.decay
+        )
+    ]
+    return weights_.weight_vector(lanes, uids, uids[burn])
 
 
 def set_weights(
@@ -90,37 +96,16 @@ class WeightsThread(threading.Thread):
         chain.close()
 
 
-def step(cfg: Config, state: State, vector: VectorLane, chain: chain_.Chain) -> str:
-    """One pass of the loop: intake, then genesis or the oldest queued duel. What it did."""
-    from vector_orchestrator.duel.orchestrate import CrownMoved, DuelFailed
+def step(cfg: Config, state: State, vector: VectorLane, chain: chain_.Chain) -> Progress:
+    """One pass of the loop: take in what the chain says, then let the lane do one piece of work.
 
+    Nothing here knows what that work is. A lane returns a `Progress` rather than raising its
+    engine's exceptions, so this loop runs a competition whose engine it cannot import.
+    """
     changed = vector.intake(chain.commitments(), chain.block())
     for entry in changed:
         log.info("intake: %s from %s is %s", entry.entry, entry.hotkey, entry.status)
-    if not vector.ready():
-        log.info("the throne is empty: crowning the baseline by genesis")
-        result = vector.genesis(chain)
-        return f"genesis: {result['status']} ({result['reason']})"
-    queue = vector.queue()
-    if not queue:
-        return "idle"
-    entry = queue[0]
-    log.info("duel: %s from %s (committed at %s)", entry.entry, entry.hotkey, entry.commit_block)
-    try:
-        result = vector.duel(entry, chain)
-    except seed_.NotYet as exc:
-        return f"waiting: {exc}"
-    except CrownMoved as exc:
-        return f"crown moved, duel again: {exc}"
-    except DuelFailed as exc:
-        log.error("duel of %s failed (it stays queued): %s", entry.entry, exc)
-        return f"failed: {exc}"
-    record = result.get("record") or {}
-    return (
-        f"{result['status']}: {result['reason']}; dethroned={record.get('dethroned')} "
-        f"king={record.get('king_scores', {}).get('average') if record else None} "
-        f"challenger={record.get('challenger_scores', {}).get('average') if record else None}"
-    )
+    return vector.step(chain)
 
 
 def cmd_run(args: argparse.Namespace, cfg: Config) -> int:
@@ -135,13 +120,13 @@ def cmd_run(args: argparse.Namespace, cfg: Config) -> int:
         while True:
             try:
                 what = step(cfg, state, vector, chain)
-            except Exception:  # noqa: BLE001 - logged; the loop goes on after a pause
+            except Exception as exc:  # noqa: BLE001 - logged; the loop goes on after a pause
                 log.exception("the loop's step failed")
-                what = "error"
+                what = Progress(vector.name, FAILED, f"the step raised: {exc}")
             log.info("step: %s", what)
             if args.once:
                 return 0
-            if what in ("idle", "error") or what.startswith(("waiting", "failed")):
+            if what.resting:
                 time.sleep(IDLE_S)
     except KeyboardInterrupt:
         return 0
@@ -215,19 +200,7 @@ def cmd_weights(args: argparse.Namespace, cfg: Config) -> int:
 def cmd_status(args: argparse.Namespace, cfg: Config) -> int:
     state = State(cfg.state)
     vector = lane(cfg, state)
-    head = vector.engine.store.head("vector_level1") or {}
-    print(
-        json.dumps(
-            {
-                "king": head.get("king"),
-                "champions": vector.champions(),
-                "queue": [e.__dict__ for e in vector.queue()],
-                "entries": state.lane("vector")["entries"],
-            },
-            indent=1,
-            default=str,
-        )
-    )
+    print(json.dumps({vector.name: vector.snapshot()}, indent=1, default=str))
     return 0
 
 

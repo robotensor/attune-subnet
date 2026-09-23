@@ -37,6 +37,7 @@ from ..config import VectorConfig
 from ..protocol import commitment as commitment_
 from ..protocol import seed as seed_
 from ..state import PENDING, QUEUED, State
+from .base import FAILED, IDLE, WAITING, WORKED, Award, Progress
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +60,9 @@ class Entry:
 
 
 class VectorLane:
+    #: What the chain's commitments carry and `[lanes.vector]` configures.
+    name = LANE
+
     def __init__(self, cfg: VectorConfig, state: State, *, hub_token: str | None = None) -> None:
         self.cfg = cfg
         self.state = state
@@ -291,6 +295,59 @@ class VectorLane:
         lane["block_counter"] = max(int(lane["block_counter"]), head) + 1
         self.state.save()
         return int(lane["block_counter"])
+
+    # -- the validator's view ----------------------------------------------------------------
+
+    def step(self, chain: Any) -> Progress:
+        """One duel, or the genesis before the first one. Never raises the orchestrator's."""
+        from vector_orchestrator.duel.orchestrate import CrownMoved, DuelFailed
+
+        if not self.ready():
+            log.info("the throne is empty: crowning the baseline by genesis")
+            try:
+                result = self.genesis(chain)
+            except DuelFailed as exc:
+                return Progress(LANE, FAILED, f"genesis: {exc}")
+            return Progress(LANE, WORKED, f"genesis: {result['reason']}", result.get("record"))
+        queue = self.queue()
+        if not queue:
+            return Progress(LANE, IDLE, "nothing queued")
+        entry = queue[0]
+        log.info(
+            "duel: %s from %s (committed at %s)", entry.entry, entry.hotkey, entry.commit_block
+        )
+        try:
+            result = self.duel(entry, chain)
+        except seed_.NotYet as exc:
+            return Progress(LANE, WAITING, str(exc))
+        except CrownMoved as exc:
+            # The king changed under us; the entry is still queued and duels the new one next.
+            return Progress(LANE, WAITING, f"the crown moved, duelling again: {exc}")
+        except DuelFailed as exc:
+            log.error("duel of %s failed (it stays queued): %s", entry.entry, exc)
+            return Progress(LANE, FAILED, str(exc))
+        record = result.get("record") or {}
+        detail = (
+            f"{result['reason']}; dethroned={record.get('dethroned')} "
+            f"king={record.get('king_scores', {}).get('average')} "
+            f"challenger={record.get('challenger_scores', {}).get('average')}"
+        )
+        return Progress(LANE, WORKED, detail, record)
+
+    def award(self) -> Award:
+        """The champion pool of the subnet spec: the five newest crowned models, paid equally."""
+        return Award(self.champions())
+
+    def snapshot(self) -> dict[str, Any]:
+        """Where the competition stands: the king, the champions, the queue and every entry."""
+        head = self.engine.store.head(TRACK) or {}
+        return {
+            "track": TRACK,
+            "king": head.get("king"),
+            "champions": self.champions(),
+            "queue": [e.__dict__ for e in self.queue()],
+            "entries": self.state.lane(LANE)["entries"],
+        }
 
     # -- champions --------------------------------------------------------------------------
 

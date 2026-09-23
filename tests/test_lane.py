@@ -7,7 +7,7 @@ import pytest
 
 from robotensor_subnet.chain import Commitment
 from robotensor_subnet.config import VectorConfig
-from robotensor_subnet.lanes.vector import VectorLane
+from robotensor_subnet.lanes.vector import Entry, VectorLane
 from robotensor_subnet.protocol import commitment
 from robotensor_subnet.state import State
 
@@ -140,3 +140,47 @@ def test_a_settled_entry_is_not_taken_in_again(lane):
 
 def test_the_empty_store_has_no_king_and_no_champions(lane):
     assert not lane.ready() and lane.champions() == []
+
+
+def test_the_lane_is_what_the_validator_asks_of_a_competition(lane):
+    """The shape the loop drives, so a second competition can be driven by the same loop."""
+    from robotensor_subnet.lanes.base import Lane
+
+    assert isinstance(lane, Lane)
+    assert lane.name == "vector"
+
+
+def test_a_step_reports_the_engines_failure_rather_than_raising_it(lane, monkeypatch):
+    """The loop cannot catch what it cannot import: a validator running one competition does not
+    install the other's engine, so a lane's own failures come back as a `Progress`."""
+    from vector_orchestrator.duel.orchestrate import DuelFailed
+
+    from robotensor_subnet.lanes.base import FAILED
+
+    monkeypatch.setattr(type(lane), "ready", lambda self: False)
+    monkeypatch.setattr(
+        type(lane), "genesis", lambda self, chain: (_ for _ in ()).throw(DuelFailed("no harness"))
+    )
+
+    progress = lane.step(chain=None)
+
+    assert progress.outcome == FAILED and "no harness" in progress.detail
+    assert progress.resting and progress.lane == "vector"
+
+
+def test_a_seed_block_that_is_not_final_yet_is_waiting_not_a_failure(lane, monkeypatch):
+    from robotensor_subnet.lanes.base import WAITING
+    from robotensor_subnet.protocol import seed as seed_
+
+    monkeypatch.setattr(type(lane), "ready", lambda self: True)
+    entry = Entry("k", "hk", "m/one", A, 10, "queued")
+    monkeypatch.setattr(type(lane), "queue", lambda self: [entry])
+    monkeypatch.setattr(
+        type(lane),
+        "duel",
+        lambda self, entry, chain, size=None: (_ for _ in ()).throw(seed_.NotYet("3 blocks to go")),
+    )
+
+    progress = lane.step(chain=None)
+
+    assert progress.outcome == WAITING and "3 blocks to go" in progress.detail

@@ -91,7 +91,9 @@ def load(path: str | os.PathLike[str]) -> Config:
         wallet_name=str(validator.get("wallet_name", "validator")),
         wallet_hotkey=str(validator.get("wallet_hotkey", "default")),
         wallet_path=validator.get("wallet_path") or None,
-        state=_path(base, validator.get("state", "var/validator-state.json")),
+        # A directory of one document per lane. A config naming the single file it used to be is
+        # read as the directory beside it, and that file is split into it once.
+        state=_path(base, validator.get("state", "var/validator-state")),
         weights_interval_blocks=int(validator.get("weights_interval_blocks", 360)),
         burn_hotkey=str(validator.get("burn_hotkey", "")),
         vector=vector,

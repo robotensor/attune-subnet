@@ -7,7 +7,7 @@ netuid = 2
 wallet_name = "owner"
 wallet_hotkey = "default"
 wallet_path = "var/wallets"
-state = "var/localnet/validator-state.json"
+state = "var/localnet/validator-state"
 # Fast blocks (250 ms): a weights interval of 100 blocks is 25 s.
 weights_interval_blocks = 100
 # Empty: the subnet owner's hotkey (uid 0) takes what no lane claims.

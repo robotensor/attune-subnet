@@ -8,7 +8,7 @@ netuid = 0
 wallet_name = "robotensor-owner"
 wallet_hotkey = "default"
 wallet_path = ""
-state = "var/testnet/validator-state.json"
+state = "var/testnet/validator-state"
 # 12 s blocks: 360 blocks is one tempo, 72 minutes; the chain's weights rate limit is 100.
 weights_interval_blocks = 360
 # Empty: the subnet owner's hotkey (uid 0) takes what no lane claims.

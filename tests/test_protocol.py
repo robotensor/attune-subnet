@@ -87,3 +87,57 @@ def test_no_champion_yet_burns_everything():
 def test_shares_over_one_are_refused():
     with pytest.raises(ValueError):
         weight_vector([Lane("a", 0.7, []), Lane("b", 0.5, [])], {}, burn_uid=0)
+
+
+def test_winner_takes_all_pays_the_newest_entry_and_nothing_older():
+    """Horizon's cadence: one epoch, one winner. The runners-up of a closed epoch are champions
+    of earlier ones and are not paid again."""
+    lane = Lane("horizon", 0.70, ["new", "older", "oldest"], entries=1, decay=0.0)
+
+    w = weight_vector([lane], {"new": 1, "older": 2, "oldest": 3, "o": 0}, burn_uid=0)
+
+    assert w == pytest.approx({0: 0.30, 1: 0.70})
+
+
+def test_a_winner_who_deregistered_burns_the_whole_lane_share():
+    """The cliff winner-takes-all has: with one entry there is nobody to fall back to, and the
+    share burns until the next epoch closes."""
+    lane = Lane("horizon", 0.70, ["gone", "older"], entries=1, decay=0.0)
+
+    w = weight_vector([lane], {"older": 2, "o": 0}, burn_uid=0)
+
+    assert w == pytest.approx({0: 1.0})
+
+
+def test_decay_splits_the_share_geometrically_and_entries_caps_the_pool():
+    """Between the two cadences: each step back is worth `decay` of the one in front, over the
+    newest `entries` alone."""
+    hotkeys = ["h1", "h2", "h3"]
+    uids = {h: i + 1 for i, h in enumerate(hotkeys)} | {"o": 0}
+
+    w = weight_vector([Lane("vector", 0.35, hotkeys, entries=2, decay=0.5)], uids, burn_uid=0)
+
+    # 1 and 0.5 of the share's 0.35: two thirds and one third.
+    assert w[1] == pytest.approx(0.35 * 2 / 3) and w[2] == pytest.approx(0.35 / 3)
+    assert uids["h3"] not in w and w[0] == pytest.approx(0.65)
+
+
+def test_the_champion_pool_is_what_it_always_was_by_default():
+    """Vector's cadence is the default: five entries, equal parts. A lane that says nothing about
+    `decay` or `entries` is paid exactly as before they existed."""
+    hotkeys = ["h1", "h2", "h3", "h4", "h5"]
+    uids = {h: i + 1 for i, h in enumerate(hotkeys)} | {"o": 0}
+
+    plain = weight_vector([Lane("vector", 0.30, hotkeys)], uids, burn_uid=0)
+    spelled_out = weight_vector(
+        [Lane("vector", 0.30, hotkeys, entries=5, decay=1.0)], uids, burn_uid=0
+    )
+
+    assert plain == spelled_out
+    assert all(plain[uids[h]] == pytest.approx(0.06) for h in hotkeys)
+
+
+@pytest.mark.parametrize("bad", [{"entries": 0}, {"decay": -0.1}, {"decay": 1.5}])
+def test_a_lane_that_could_not_pay_anyone_is_refused(bad):
+    with pytest.raises(ValueError):
+        Lane("horizon", 0.70, ["a"], **bad)

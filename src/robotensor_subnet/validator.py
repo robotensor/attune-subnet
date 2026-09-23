@@ -1,14 +1,15 @@
-"""`robotensor-validator`: read commitments, run the lanes' duels, set weights.
+"""`robotensor-validator`: read commitments, run the competitions, set weights.
 
-    run      the loop: intake -> genesis (once) -> the oldest queued duel -> ... ; a thread of its
-             own keeps setting weights every `weights_interval_blocks`, because one duel can take
-             hours and a validator must stay inside the chain's activity cutoff meanwhile
+    run      every configured competition, each in a worker process of its own (`supervisor`),
+             with a weights thread beside them: one duel can take hours and a validator must stay
+             inside the chain's activity cutoff meanwhile
     intake   read the chain's commitments into the lanes once, and print what changed
-    duel     run one duel now: the queue's next, or --challenger repo@sha (a manual duel)
+    duel     run one Vector duel now: the queue's next, or --challenger repo@sha
     weights  compute the weight vector and set it (--dry-run prints it)
-    status   the lanes' queues, champions and kings
+    status   where each competition stands
 
-The chain is `chain.Chain`, the only bittensor code; the Vector competition is `lanes.vector`.
+The chain is `chain.Chain`, the only bittensor code. What a competition is lives behind
+`lanes.base.Lane`; nothing here knows what a duel or an epoch is.
 """
 
 from __future__ import annotations
@@ -19,21 +20,17 @@ import logging
 import os
 import sys
 import threading
-import time
 from typing import Any
 
 from . import chain as chain_
+from . import supervisor
 from .config import Config, load
-from .lanes.base import FAILED, Progress
 from .lanes.vector import Entry, VectorLane
 from .protocol import seed as seed_
 from .protocol import weights as weights_
 from .state import State
 
 log = logging.getLogger("robotensor.validator")
-
-#: How long the loop sleeps when there is nothing to duel.
-IDLE_S = 30.0
 
 
 def hub_token() -> str | None:
@@ -96,44 +93,13 @@ class WeightsThread(threading.Thread):
         chain.close()
 
 
-def step(cfg: Config, state: State, vector: VectorLane, chain: chain_.Chain) -> Progress:
-    """One pass of the loop: take in what the chain says, then let the lane do one piece of work.
-
-    Nothing here knows what that work is. A lane returns a `Progress` rather than raising its
-    engine's exceptions, so this loop runs a competition whose engine it cannot import.
-    """
-    changed = vector.intake(chain.commitments(), chain.block())
-    for entry in changed:
-        log.info("intake: %s from %s is %s", entry.entry, entry.hotkey, entry.status)
-    return vector.step(chain)
-
-
 def cmd_run(args: argparse.Namespace, cfg: Config) -> int:
+    """Every configured competition, each in a worker of its own, and the weights thread."""
     wallet = chain_.wallet(cfg.wallet_name, cfg.wallet_hotkey, cfg.wallet_path)
-    state = State(cfg.state)
-    vector = lane(cfg, state)
-    chain = chain_.Chain(cfg.network, cfg.netuid)
     weights = WeightsThread(cfg, str(cfg.state), wallet) if not args.no_weights else None
     if weights is not None:
         weights.start()
-    try:
-        while True:
-            try:
-                what = step(cfg, state, vector, chain)
-            except Exception as exc:  # noqa: BLE001 - logged; the loop goes on after a pause
-                log.exception("the loop's step failed")
-                what = Progress(vector.name, FAILED, f"the step raised: {exc}")
-            log.info("step: %s", what)
-            if args.once:
-                return 0
-            if what.resting:
-                time.sleep(IDLE_S)
-    except KeyboardInterrupt:
-        return 0
-    finally:
-        if weights is not None:
-            weights.stop.set()
-        chain.close()
+    return supervisor.run(cfg, once=args.once, weights=weights)
 
 
 def cmd_intake(args: argparse.Namespace, cfg: Config) -> int:

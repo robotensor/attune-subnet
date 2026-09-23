@@ -82,6 +82,49 @@ def cmd_commit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_submit(args: argparse.Namespace) -> int:
+    """check -> upload private -> commit on chain -> publish, in the order that keeps your
+    weights yours: the earliest commitment of a set of weights keeps them, so nobody may see the
+    file until the chain says it is yours."""
+    from . import chain as chain_
+
+    if cmd_check(args) != 0:
+        print("error: the weights did not pass the check the validator runs", file=sys.stderr)
+        return 1
+    weights = Path(args.dir) / hub.WEIGHTS_FILE if Path(args.dir).is_dir() else Path(args.dir)
+    readme = Path(args.readme).read_text(encoding="utf-8") if args.readme else None
+    token = os.environ.get("HF_TOKEN")
+    sha = hub.upload_weights(args.repo, str(weights), token=token, private=True, readme=readme)
+    data = commitment_.encode(args.repo, sha)
+    wallet = chain_.wallet(args.wallet_name, args.wallet_hotkey, args.wallet_path)
+    chain = chain_.Chain(args.network, args.netuid)
+    try:
+        chain.commit(wallet, data)
+        block = chain.block()
+    finally:
+        chain.close()
+    published = False
+    if not args.keep_private:
+        from huggingface_hub import HfApi
+
+        HfApi(token=token).update_repo_settings(args.repo, private=False)
+        published = True
+    print(
+        json.dumps(
+            {
+                "repo": args.repo,
+                "revision": sha,
+                "committed": data,
+                "block": block,
+                "public": published,
+                "fee": "none: this subnet charges nothing to submit",
+            },
+            indent=1,
+        )
+    )
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     from . import chain as chain_
 
@@ -144,6 +187,25 @@ def add_subcommands(sub: Any) -> None:
     commit.add_argument("--wallet.hotkey", dest="wallet_hotkey", required=True)
     commit.add_argument("--wallet.path", dest="wallet_path", default=None)
     commit.set_defaults(func=cmd_commit)
+
+    submit = sub.add_parser(
+        "submit", help="check, upload private, commit on chain, then publish - in that order"
+    )
+    submit.add_argument(
+        "--dir", required=True, help="the directory holding model.safetensors, or the file"
+    )
+    submit.add_argument("--repo", required=True, help="your Hugging Face model repository")
+    submit.add_argument("--readme", default=None, help="a README.md to upload beside it")
+    submit.add_argument(
+        "--keep-private",
+        action="store_true",
+        help="leave the repository private; the validator waits a while, then refuses it",
+    )
+    _chain_args(submit)
+    submit.add_argument("--wallet.name", dest="wallet_name", required=True)
+    submit.add_argument("--wallet.hotkey", dest="wallet_hotkey", required=True)
+    submit.add_argument("--wallet.path", dest="wallet_path", default=None)
+    submit.set_defaults(func=cmd_submit)
 
     status = sub.add_parser("status", help="your hotkey's commitment on chain")
     status.add_argument("--hotkey", required=True, help="your hotkey's ss58 address")

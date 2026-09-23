@@ -106,8 +106,36 @@ class Config:
         return lane
 
 
+#: What a path starting with this names: a file the installed engine ships, rather than one in a
+#: checkout. `@vector_orchestrator/specs/vector_level1.json` is the contract in its wheel.
+PACKAGED = "@"
+
+
+def _packaged(value: str) -> Path:
+    """A `@<package>/<path>` spelling, resolved inside the installed package's `data/`."""
+    from importlib.resources import files
+
+    package, _, rest = value[len(PACKAGED) :].partition("/")
+    if not package or not rest:
+        raise ConfigError(f"{value!r} is not @<package>/<path inside its data>")
+    try:
+        root = files(package)
+    except ModuleNotFoundError:
+        raise ConfigError(f"{value!r}: {package} is not installed") from None
+    here = Path(str(root))
+    # A wheel carries the contracts under the package's own `data/`; an editable install is the
+    # checkout itself, where they sit beside `src/`. Both are "what this engine ships".
+    for found in (here / "data" / rest, here.parent.parent / rest):
+        if found.is_file():
+            return found
+    raise ConfigError(f"{value!r}: {package} ships no {rest}")
+
+
 def _path(base: Path, value: Any) -> Path:
-    path = Path(os.path.expandvars(os.path.expanduser(str(value))))
+    text = str(value)
+    if text.startswith(PACKAGED):
+        return _packaged(text)
+    path = Path(os.path.expandvars(os.path.expanduser(text)))
     return path if path.is_absolute() else (base / path).resolve()
 
 

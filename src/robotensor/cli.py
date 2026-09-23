@@ -1,5 +1,6 @@
 """`robotensor`: one command for everything a miner or a validator of this subnet does.
 
+    robotensor init [DIR] [--role miner|validator]
     robotensor --version
     robotensor doctor [--competition vector] [--role miner|validator] [--json]
     robotensor status [--competition vector]
@@ -21,6 +22,7 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Any
 
 from . import __version__
@@ -63,6 +65,19 @@ def competition(
     )
 
 
+def cmd_init(args: argparse.Namespace) -> int:
+    from . import init as init_
+
+    directory = Path(args.directory).expanduser().resolve()
+    if args.role == "miner":
+        print(init_.miner(directory))
+        return 0
+    path = init_.validator(directory)
+    print(f"wrote {path}")
+    print("Fill in the wallet and the netuid, then: robotensor doctor --config", path)
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     from .doctor import render, report
 
@@ -93,6 +108,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="robotensor", description=__doc__.split("\n")[0])
     parser.add_argument("--version", action="version", version=f"robotensor {__version__}")
     sub = parser.add_subparsers(dest="part", required=True)
+
+    start = sub.add_parser("init", help="a working directory, and a config to fill in")
+    start.add_argument("directory", nargs="?", default=".", help="where to write it (default: .)")
+    start.add_argument(
+        "--role", default="validator", choices=("miner", "validator"), help="what it is for"
+    )
+    start.add_argument("--competition", default=None, help="vector (the only one open)")
+    start.set_defaults(func=cmd_init)
 
     doctor = sub.add_parser("doctor", help="can this host do what it is configured to do?")
     doctor.add_argument("--config", default=None, help="config/<network>.toml")

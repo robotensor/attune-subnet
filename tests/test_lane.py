@@ -76,6 +76,19 @@ def test_new_commitments_are_queued_oldest_first(lane):
     assert [e.hotkey for e in lane.queue()] == ["hk1", "hk2"]
 
 
+def test_a_commitment_this_subnet_does_not_read_is_skipped(lane):
+    """A prefix from before the lane was named, or anything else that is not a commitment, is
+    passed over without a word: the chain keeps what was written at a block forever, and one
+    stale entry must not stop the rest of an intake."""
+    hub = FakeHub({f"m/one@{A}": {"model.safetensors": "w1"}})
+    stale = Commitment(hotkey="hk0", block=5, data=f"vector1:m/old@{C}")
+    nonsense = Commitment(hotkey="hk3", block=6, data="hello")
+
+    lane.intake([stale, nonsense, c("hk1", "m/one", A, 10)], 30, api=hub)
+
+    assert [(e.hotkey, e.repo) for e in lane.queue()] == [("hk1", "m/one")]
+
+
 def test_a_repository_holding_code_is_refused(lane):
     hub = FakeHub({f"m/one@{A}": {"model.safetensors": "w1", "policy.py": None}})
     (entry,) = lane.intake([c("hk1", "m/one", A, 10)], 30, api=hub)

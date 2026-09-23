@@ -15,7 +15,7 @@ burn_hotkey = ""
 
 [lanes.vector]
 share = 0.30
-spec = "/root/robotensor/vector/vector-orchestrator/specs/vector_l1.json"
+spec = "/root/robotensor/vector/vector-orchestrator/specs/vector_level1.json"
 store = "var/localnet/vector/store"
 key = "var/localnet/vector-keys/orchestrator.ed25519"
 run_dir = "var/localnet/vector/runs"
@@ -30,4 +30,4 @@ policy_kwargs = { device = "cuda:0" }
 # Units at once: each is a simulator (~6 GB) and a policy server (~3 GB) on the GPU. Measured on
 # one RTX PRO 6000: 3 at once give 1.5x the throughput of 1, 5 give 1.7x; the CPU and GPU saturate.
 workers = 4
-mirror = "robotensor/vector-l1-results"
+mirror = "robotensor/vector-results"

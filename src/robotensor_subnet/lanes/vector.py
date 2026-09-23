@@ -2,7 +2,7 @@
 
 This module is the chain's side of the lane and nothing else. The lane engine is
 `vector_orchestrator` (duels, the weights runtime, the signed store), run as a library on the
-`vector_l1` contract (`specs/vector_l1.json` in the orchestrator); the benchmark is the RoboTwin-Vector fork's
+`vector_level1` contract (`specs/vector_level1.json` in the orchestrator); the benchmark is the RoboTwin-Vector fork's
 plugin; the model code is `vector_runtime`. What happens here:
 
 **Intake.** Every `vector:` commitment on chain is read with the block it was made at. A new one is
@@ -41,7 +41,7 @@ from ..state import PENDING, QUEUED, State
 log = logging.getLogger(__name__)
 
 LANE = "vector"
-TRACK = "vector_l1"
+TRACK = "vector_level1"
 
 
 @dataclass(frozen=True)

@@ -215,7 +215,7 @@ def cmd_weights(args: argparse.Namespace, cfg: Config) -> int:
 def cmd_status(args: argparse.Namespace, cfg: Config) -> int:
     state = State(cfg.state)
     vector = lane(cfg, state)
-    head = vector.engine.store.head("vector_l1") or {}
+    head = vector.engine.store.head("vector_level1") or {}
     print(
         json.dumps(
             {

@@ -16,7 +16,7 @@ burn_hotkey = ""
 
 [lanes.vector]
 share = 0.30
-spec = "/root/robotensor/vector/vector-orchestrator/specs/vector_l1.json"
+spec = "/root/robotensor/vector/vector-orchestrator/specs/vector_level1.json"
 store = "var/testnet/vector/store"
 key = "var/testnet/vector-keys/orchestrator.ed25519"
 run_dir = "var/testnet/vector/runs"
@@ -32,4 +32,4 @@ policy_kwargs = { device = "cuda:0" }
 # one RTX PRO 6000: 3 at once give 1.5x the throughput of 1, 5 give 1.7x; the CPU and GPU saturate.
 workers = 4
 # A Hugging Face dataset the signed store is published to, for the dashboard; empty for none.
-mirror = "robotensor/vector-l1-results"
+mirror = "robotensor/vector-results"

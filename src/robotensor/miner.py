@@ -19,6 +19,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from . import hub
 from .protocol import commitment as commitment_
@@ -115,10 +116,9 @@ def _chain_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--netuid", type=int, required=True)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="robotensor-miner", description=__doc__.split("\n")[0])
-    sub = parser.add_subparsers(dest="command", required=True)
-
+def add_subcommands(sub: Any) -> None:
+    """Hang a miner's verbs off `sub`, so `robotensor miner ...` and the standalone command are
+    the same parser rather than two that drift."""
     check = sub.add_parser("check", help="check model.safetensors as the validator does")
     check.add_argument(
         "--dir", required=True, help="the directory holding model.safetensors, or the file"
@@ -149,6 +149,11 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("--hotkey", required=True, help="your hotkey's ss58 address")
     _chain_args(status)
     status.set_defaults(func=cmd_status)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="robotensor-miner", description=__doc__.split("\n")[0])
+    add_subcommands(parser.add_subparsers(dest="command", required=True))
     return parser
 
 

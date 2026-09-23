@@ -170,12 +170,9 @@ def cmd_status(args: argparse.Namespace, cfg: Config) -> int:
     return 0
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="robotensor-validator", description=__doc__.split("\n")[0]
-    )
-    parser.add_argument("--config", required=True, help="config/<network>.toml")
-    sub = parser.add_subparsers(dest="command", required=True)
+def add_subcommands(sub: Any) -> None:
+    """Hang a validator's verbs off `sub`, so `robotensor validator ...` and the standalone
+    command are the same parser rather than two that drift."""
     run = sub.add_parser("run", help="the validator loop")
     run.add_argument("--once", action="store_true", help="one step, then exit")
     run.add_argument("--no-weights", action="store_true", help="never set weights")
@@ -196,6 +193,14 @@ def build_parser() -> argparse.ArgumentParser:
     weights.add_argument("--dry-run", action="store_true", help="print, do not set")
     weights.set_defaults(func=cmd_weights)
     sub.add_parser("status", help="queue, king and champions").set_defaults(func=cmd_status)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="robotensor-validator", description=__doc__.split("\n")[0]
+    )
+    parser.add_argument("--config", required=True, help="config/<network>.toml")
+    add_subcommands(parser.add_subparsers(dest="command", required=True))
     return parser
 
 

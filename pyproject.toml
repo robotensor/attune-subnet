@@ -19,6 +19,9 @@ dependencies = ["bittensor==10.5.0", "huggingface_hub>=1.0"]
 dev = ["pytest>=8", "ruff==0.16.7"]
 
 [project.scripts]
+robotensor = "robotensor.cli:main"
+# The names the two halves had before there was one command. They stay through 0.2, so a running
+# validator's unit file and a miner's notes keep working.
 robotensor-miner = "robotensor.miner:main"
 robotensor-validator = "robotensor.validator:main"
 

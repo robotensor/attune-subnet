@@ -92,7 +92,7 @@ class WeightsThread(threading.Thread):
 
 def step(cfg: Config, state: State, vector: VectorLane, chain: chain_.Chain) -> str:
     """One pass of the loop: intake, then genesis or the oldest queued duel. What it did."""
-    from icil_orchestrator.duel.orchestrate import CrownMoved, DuelFailed
+    from vector_orchestrator.duel.orchestrate import CrownMoved, DuelFailed
 
     changed = vector.intake(chain.commitments(), chain.block())
     for entry in changed:
@@ -169,7 +169,7 @@ def cmd_duel(args: argparse.Namespace, cfg: Config) -> int:
         print(json.dumps(vector.genesis(chain), indent=1, default=str))
     if args.challenger:
         repo, _, revision = args.challenger.partition("@")
-        from icil_orchestrator.ids import submission_key
+        from vector_orchestrator.ids import submission_key
 
         key = submission_key(repo, revision)
         entries = state.lane("vector")["entries"]
@@ -267,13 +267,13 @@ def _logging() -> None:
     import bittensor  # noqa: F401 - for its logging setup, before ours
 
     for name, logger in list(logging.root.manager.loggerDict.items()):
-        if name.startswith(("robotensor", "icil_orchestrator")) and isinstance(
+        if name.startswith(("robotensor", "vector_orchestrator")) and isinstance(
             logger, logging.Logger
         ):
             logger.setLevel(logging.NOTSET)
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    for name in ("robotensor", "icil_orchestrator"):
+    for name in ("robotensor", "vector_orchestrator"):
         logger = logging.getLogger(name)
         logger.setLevel(logging.INFO)
         logger.handlers[:] = [handler]

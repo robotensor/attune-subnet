@@ -1,6 +1,6 @@
 """Which chain block seeds a duel.
 
-A duel's units are drawn from its id and a block hash (`icil_orchestrator` `DuelRequest.entropy`).
+A duel's units are drawn from its id and a block hash (`vector_orchestrator` `DuelRequest.entropy`).
 The block is the current one when the duel starts, less `finality` blocks so its hash is final, and
 it must come after the challenger's commitment: then nobody - the challenger included - could know
 the hash when the challenger committed, so nobody could have trained for, or picked, its units.

@@ -11,7 +11,7 @@ from robotensor_subnet.lanes.vector import VectorLane
 from robotensor_subnet.protocol import commitment
 from robotensor_subnet.state import State
 
-pytest.importorskip("icil_orchestrator")
+pytest.importorskip("vector_orchestrator")
 
 SPEC = Path("/root/robotensor/vector/vector-orchestrator/specs/vector_l1.json")
 A, B, C = "a" * 40, "b" * 40, "c" * 40

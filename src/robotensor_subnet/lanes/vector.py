@@ -1,7 +1,7 @@
 """Robotensor Vector: chain commitments in, king-of-the-hill duels out, through its orchestrator.
 
 This module is the chain's side of the lane and nothing else. The lane engine is
-`icil_orchestrator` (duels, the weights runtime, the signed store), run as a library on the
+`vector_orchestrator` (duels, the weights runtime, the signed store), run as a library on the
 `vector_l1` contract (`specs/vector_l1.json` in the orchestrator); the benchmark is the RoboTwin-Vector fork's
 plugin; the model code is `vector_runtime`. What happens here:
 
@@ -75,12 +75,12 @@ class VectorLane:
 
     def _build_engine(self) -> Any:
         # The benchmark plugin builds its commands for this interpreter.
-        os.environ["ROBOTWIN_ICIL_PYTHON"] = self.cfg.simulator_python
-        from icil_orchestrator.canon import Signer
-        from icil_orchestrator.duel.orchestrate import Orchestrator
-        from icil_orchestrator.duel.weights_runtime import WeightsPolicyRuntime
-        from icil_orchestrator.spec import load_spec
-        from icil_orchestrator.store.writer import Store, store_lock
+        os.environ["ROBOTWIN_BENCH_PYTHON"] = self.cfg.simulator_python
+        from vector_orchestrator.canon import Signer
+        from vector_orchestrator.duel.orchestrate import Orchestrator
+        from vector_orchestrator.duel.weights_runtime import WeightsPolicyRuntime
+        from vector_orchestrator.spec import load_spec
+        from vector_orchestrator.store.writer import Store, store_lock
 
         spec = load_spec(self.cfg.spec)
         if TRACK not in spec.tracks:
@@ -107,7 +107,7 @@ class VectorLane:
         )
         mirror = None
         if self.cfg.mirror:
-            from icil_orchestrator.store.mirror import Mirror
+            from vector_orchestrator.store.mirror import Mirror
 
             mirror = Mirror(store.root, self.cfg.mirror, token=os.environ.get("HF_TOKEN"))
         return Orchestrator(
@@ -126,7 +126,7 @@ class VectorLane:
 
     def intake(self, commitments: list[Commitment], block: int, *, api: Any = None) -> list[Entry]:
         """Take every new `vector:` commitment into the lane; the entries it changed."""
-        from icil_orchestrator.ids import submission_key
+        from vector_orchestrator.ids import submission_key
 
         lane = self.state.lane(LANE)
         entries, by_weights = lane["entries"], lane["by_weights"]
@@ -206,8 +206,8 @@ class VectorLane:
 
     def genesis(self, chain: Any) -> dict[str, Any]:
         """Crown the declared baseline on the empty throne, seeded from the chain's head."""
-        from icil_orchestrator.duel.orchestrate import DuelRequest
-        from icil_orchestrator.store.writer import store_lock
+        from vector_orchestrator.duel.orchestrate import DuelRequest
+        from vector_orchestrator.store.writer import store_lock
 
         baseline = self.spec.baseline(TRACK) or {}
         revision = baseline.get("revision") or self.cfg.genesis_revision
@@ -233,9 +233,9 @@ class VectorLane:
         """Duel `entry` against the king, seeded from a block after its commitment. Raises
         `seed.NotYet` when the chain has not moved far enough, and the orchestrator's
         `HarnessUnavailable`/`DuelFailed` when the harness cannot run it (the entry stays queued)."""
-        from icil_orchestrator.duel.orchestrate import CrownMoved, DuelRequest
-        from icil_orchestrator.ids import SubmissionRef
-        from icil_orchestrator.store.writer import store_lock
+        from vector_orchestrator.duel.orchestrate import CrownMoved, DuelRequest
+        from vector_orchestrator.ids import SubmissionRef
+        from vector_orchestrator.store.writer import store_lock
 
         head = self.engine.store.head(TRACK) or {}
         king = SubmissionRef.from_dict(head.get("king"))
@@ -297,7 +297,7 @@ class VectorLane:
     def champions(self) -> list[str | None]:
         """Every model this lane crowned, newest first, as the hotkey that committed it; None for
         the genesis baseline. Read from the signed store's index."""
-        from icil_orchestrator.ids import submission_key
+        from vector_orchestrator.ids import submission_key
 
         entries = self.state.lane(LANE)["entries"]
         crowned = []

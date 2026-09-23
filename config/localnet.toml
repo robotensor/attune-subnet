@@ -30,4 +30,4 @@ policy_kwargs = { device = "cuda:0" }
 # Units at once: each is a simulator (~6 GB) and a policy server (~3 GB) on the GPU. Measured on
 # one RTX PRO 6000: 3 at once give 1.5x the throughput of 1, 5 give 1.7x; the CPU and GPU saturate.
 workers = 4
-mirror = ""
+mirror = "robotensor/vector-l1-results"

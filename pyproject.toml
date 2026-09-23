@@ -5,21 +5,23 @@ build-backend = "hatchling.build"
 [project]
 name = "robotensor"
 version = "0.2.0"
-description = "The Robotensor Bittensor subnet: miner and validator for the Vector competition (Competition 1)."
+description = "Mine the Robotensor Bittensor subnet: build a submission, check it as the validator will, and commit it on chain."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
-# bittensor 10.x: version 11 replaced the SDK's API (see chain.py). huggingface_hub reads and
-# publishes submissions. A competition's engine and runtime come with its extra below; the
-# benchmark fork it runs is a git install, because it is gigabytes of assets nothing imports.
+# bittensor 10.x: version 11 replaced the SDK's API (see chain.py). It is here because a miner
+# commits on chain. huggingface_hub uploads the submission and reads it back.
 dependencies = ["bittensor==10.5.0", "huggingface_hub>=1.0"]
 
 [project.optional-dependencies]
-# What a validator of each competition installs. The benchmark forks are not here: both engines
-# run them as subprocesses and never import them, and they carry gigabytes of assets, so they are
-# git installs (see docs/VALIDATOR.md).
-vector = ["robotensor-vector-engine>=0.2", "robotensor-vector-runtime>=0.2"]
-horizon = ["robotensor-horizon-engine>=0.2", "robotensor-horizon-runtime-zerowam>=0.2"]
+# The index is the miner's path. Each extra is what that competition's miner needs to build a
+# submission and check it the way the validator will: the model runtime, and nothing else.
+#
+# A validator is not installed from here. Its engine runs a benchmark fork of gigabytes that
+# nothing imports, beside two Python environments with different pinned stacks, so it is a set of
+# checkouts and `docs/VALIDATOR.md` is the way in.
+vector = ["robotensor-vector-runtime>=0.2"]
+horizon = ["robotensor-horizon-runtime-zerowam>=0.2"]
 dev = ["pytest>=8", "ruff==0.16.7"]
 
 [project.scripts]

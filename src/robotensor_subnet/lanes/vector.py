@@ -123,8 +123,13 @@ class VectorLane:
         return self.engine.spec
 
     @property
-    def allowed(self) -> frozenset[str]:
-        return frozenset(self.spec.model["allowed_files"])
+    def shape(self) -> hub.Shape:
+        """What the contract says a submission may hold: weights of the pinned architecture, a
+        README, and nothing that runs."""
+        model = self.spec.model
+        return hub.vector_shape(
+            model["allowed_files"], int(self.spec.submission.get("max_repo_bytes", 0) or 0)
+        )
 
     # -- intake -----------------------------------------------------------------------------
 
@@ -156,7 +161,7 @@ class VectorLane:
             }
             try:
                 found = hub.inspect(
-                    sub.repo, sub.revision, self.allowed, api=api, token=self.hub_token
+                    sub.repo, sub.revision, self.shape, api=api, token=self.hub_token
                 )
             except hub.NotVisible as exc:
                 if block - c.block > self.cfg.private_window_blocks:

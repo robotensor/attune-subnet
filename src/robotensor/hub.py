@@ -174,8 +174,13 @@ def inspect(
     *,
     api: Any = None,
     token: str | None = None,
+    fetch: Callable[[str], bytes] | None = None,
 ) -> HubSubmission:
-    """What `repo@revision` holds, from the Hub's metadata alone."""
+    """What `repo@revision` holds, from the Hub's metadata alone.
+
+    `fetch` reads one small file the Hub knows no sha256 for; the default downloads it. Nothing
+    large is ever fetched, and nothing at all for a competition whose key covers one LFS file.
+    """
     from huggingface_hub import HfApi
     from huggingface_hub.errors import (
         GatedRepoError,
@@ -205,14 +210,14 @@ def inspect(
         if not any(shape.matches(name, [pattern]) for name in names):
             raise NotASubmission(f"holds no {pattern}")
 
-    def fetch(name: str) -> bytes:
+    def download(name: str) -> bytes:
         from huggingface_hub import hf_hub_download
 
         path = hf_hub_download(repo, name, revision=revision, token=token or None)
         with open(path, "rb") as handle:
             return handle.read()
 
-    key, size = content_key(manifest, shape, fetch=fetch)
+    key, size = content_key(manifest, shape, fetch=fetch or download)
     if shape.max_bytes and size > shape.max_bytes:
         raise NotASubmission(
             f"its weights are {size} bytes, over this competition's {shape.max_bytes}"

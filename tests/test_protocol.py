@@ -141,3 +141,14 @@ def test_the_champion_pool_is_what_it_always_was_by_default():
 def test_a_lane_that_could_not_pay_anyone_is_refused(bad):
     with pytest.raises(ValueError):
         Lane("horizon", 0.70, ["a"], **bad)
+
+
+def test_both_competitions_commitments_are_read_from_one_storage():
+    """One subnet, one commitment slot per hotkey: the prefix says which competition it entered,
+    so a miner never has to say which netuid they meant."""
+    vector = commitment.parse(f"vector:o/n@{SHA}")
+    horizon = commitment.parse(f"horizon:o/n@{SHA}")
+
+    assert (vector.lane, horizon.lane) == ("vector", "horizon")
+    assert vector.entry == horizon.entry
+    assert commitment.encode("o/n", SHA, lane="horizon") == f"horizon:o/n@{SHA}"

@@ -40,6 +40,10 @@ def build(cfg: Config, name: str, state: State) -> Lane:
         from .lanes.vector import VectorLane
 
         return VectorLane(cfg.vector, state, hub_token=hub_token())
+    if name == "horizon":
+        from .lanes.horizon import HorizonLane
+
+        return HorizonLane(cfg.horizon, state, hub_token=hub_token())
     raise ValueError(f"{name} is not a competition this build runs ({', '.join(cfg.lanes)})")
 
 

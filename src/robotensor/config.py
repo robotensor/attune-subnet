@@ -77,6 +77,43 @@ VECTOR_KEYS = tuple(f.name for f in VectorConfig.__dataclass_fields__.values() i
 
 
 @dataclass(frozen=True)
+class HorizonConfig(LaneConfig):
+    """Robotensor Horizon: the epoch schedule, and where its signed store and runs live.
+
+    The schedule is in blocks because it is the chain's: `genesis_block` and `window_blocks` are
+    all two validators need to agree on which epoch is open (`protocol.schedule`).
+    """
+
+    #: The block the first epoch opened at, and how long each one takes.
+    genesis_block: int = 0
+    window_blocks: int = 50400  # a week of 12-second blocks
+    store: Path = Path()
+    epochs: Path = Path()
+    key: Path = Path()
+    #: The engine's own configuration, which says what an epoch evaluates.
+    competition: Path | None = None
+    #: An interpreter for the engine, when it cannot share this one.
+    engine_python: str = ""
+    #: The unprivileged user a served model runs as. Without it a model served by a validator
+    #: running as root could read `pool/<unit>/private/expert.npz` - the answer key for the very
+    #: episode it is being scored on - so a lane that pays anything must name one.
+    serve_as: str = ""
+    #: A Hugging Face dataset the signed store is mirrored to; empty for none.
+    mirror: str = ""
+    #: The cards this competition may use, when the box is shared with the other one.
+    devices: tuple[int, ...] = ()
+    #: How long a commitment whose repository the Hub will not show yet (still private) waits.
+    private_window_blocks: int = 300
+    #: A submission's cap: shards, statistics and the knobs file together.
+    max_repo_bytes: int = 53687091200  # 50 GB
+
+
+HORIZON_KEYS = tuple(
+    f.name for f in HorizonConfig.__dataclass_fields__.values() if f.name != "name"
+)
+
+
+@dataclass(frozen=True)
 class Config:
     network: str
     netuid: int
@@ -97,6 +134,13 @@ class Config:
     @property
     def shares(self) -> dict[str, float]:
         return {name: lane.share for name, lane in self.lanes.items()}
+
+    @property
+    def horizon(self) -> HorizonConfig:
+        """The Horizon lane's config; `KeyError` when this validator does not run it."""
+        lane = self.lanes["horizon"]
+        assert isinstance(lane, HorizonConfig)
+        return lane
 
     @property
     def vector(self) -> VectorConfig:
@@ -171,9 +215,37 @@ def _vector(name: str, table: dict[str, Any], base: Path, path: Path) -> VectorC
     )
 
 
+def _horizon(name: str, table: dict[str, Any], base: Path, path: Path) -> HorizonConfig:
+    _refuse_unknown(f"[lanes.{name}]", table, HORIZON_KEYS, path)
+    share = float(table.get("share", 0.0))
+    serve_as = str(table.get("serve_as", ""))
+    if share > 0 and not serve_as:
+        raise ConfigError(
+            f"{path}: [lanes.{name}] pays {share:.0%} of the emission and names no serve_as. A "
+            "model served as the user running the validator can read the answer key of the "
+            "episode it is being scored on; name an unprivileged user, or set share = 0."
+        )
+    return HorizonConfig(
+        name=name,
+        share=share,
+        genesis_block=int(table.get("genesis_block", 0)),
+        window_blocks=int(table.get("window_blocks", 50400)),
+        store=_path(base, table.get("store", "var/horizon/store")),
+        epochs=_path(base, table.get("epochs", "var/horizon/epochs")),
+        key=_path(base, table.get("key", "var/horizon/keys/horizon.ed25519")),
+        competition=_path(base, table["competition"]) if table.get("competition") else None,
+        engine_python=os.path.expandvars(str(table.get("engine_python", ""))),
+        serve_as=serve_as,
+        mirror=str(table.get("mirror", "")),
+        devices=tuple(int(d) for d in (table.get("devices") or ())),
+        private_window_blocks=int(table.get("private_window_blocks", 300)),
+        max_repo_bytes=int(table.get("max_repo_bytes", 53687091200)),
+    )
+
+
 #: The competitions this build can be configured for, and how each reads its table. A lane is
-#: added here, to `protocol.commitment.LANES` and as its own `lanes/` module.
-LANES = {"vector": _vector}
+#: added here, to `protocol.commitment.LANES`, to `worker.build` and as its own `lanes/` module.
+LANES = {"vector": _vector, "horizon": _horizon}
 
 
 def load(path: str | os.PathLike[str]) -> Config:

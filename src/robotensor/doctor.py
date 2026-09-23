@@ -173,6 +173,18 @@ def _interpreter(path: str, imports: tuple[str, ...]) -> tuple[bool, str]:
     return True, f"{path} imports {', '.join(imports)}"
 
 
+def _serve_as(lane_cfg: Any) -> tuple[bool, str]:
+    """A served model must not run as the user that can read the episode's answer key."""
+    if lane_cfg.share <= 0:
+        return True, "not needed: this competition pays nothing yet"
+    if not lane_cfg.serve_as:
+        return False, "nobody named: a served model could read the episode's answer key"
+    import pwd
+
+    pwd.getpwnam(lane_cfg.serve_as)  # raises if the user is not on this host
+    return True, f"models are served as {lane_cfg.serve_as}"
+
+
 def _vector_contract(lane_cfg: Any) -> tuple[bool, str]:
     from vector_orchestrator.spec import load_spec_file
 
@@ -224,6 +236,22 @@ def validator_checks(cfg: Any, competition: str) -> list[Check]:
         _check("clock", _clock, advisory=True),
         _check("submission fee", _no_fee),
     ]
+    if competition == "horizon":
+        checks += [
+            _check(
+                "schedule",
+                lambda: (
+                    True,
+                    f"epochs of {lane_cfg.window_blocks} blocks from block "
+                    f"{lane_cfg.genesis_block}",
+                ),
+            ),
+            _check(
+                "serve_as",
+                lambda: _serve_as(lane_cfg),
+            ),
+            _check("runtime", lambda: _interpreter(sys.executable, ("horizon_runtime_zerowam",))),
+        ]
     if competition == "vector":
         checks += [
             _check("contract", lambda: _vector_contract(lane_cfg)),

@@ -164,9 +164,12 @@ def cmd_weights(args: argparse.Namespace, cfg: Config) -> int:
 
 
 def cmd_status(args: argparse.Namespace, cfg: Config) -> int:
+    """Where every competition this validator runs stands."""
+    from .worker import build
+
     state = State(cfg.state)
-    vector = lane(cfg, state)
-    print(json.dumps({vector.name: vector.snapshot()}, indent=1, default=str))
+    shown = {name: build(cfg, name, state).snapshot() for name in sorted(cfg.lanes)}
+    print(json.dumps(shown, indent=1, default=str))
     return 0
 
 

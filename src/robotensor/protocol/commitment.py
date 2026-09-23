@@ -19,9 +19,11 @@ from dataclasses import dataclass
 MAX_BYTES = 128
 #: Competition 1, action-grounded in-context learning: the only one live at launch.
 VECTOR = "vector"
-#: Competition 2, video-prompted world-action learning; wired but not yet open.
+#: Competition 2, video-prompted world-action learning. Its commitments are read and taken in;
+#: what they enter does not pay yet (`[lanes.horizon].share`), and the epoch that scores them is
+#: staged in `lanes/horizon.py`.
 HORIZON = "horizon"
-LANES = (VECTOR,)
+LANES = (VECTOR, HORIZON)
 
 REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
 SHA_RE = re.compile(r"[0-9a-f]{40}")

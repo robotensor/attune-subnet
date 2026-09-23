@@ -38,3 +38,16 @@ policy_kwargs = { device = "cuda:0" }
 # one RTX PRO 6000: 3 at once give 1.5x the throughput of 1, 5 give 1.7x; the CPU and GPU saturate.
 workers = 4
 mirror = "robotensor/vector-results"
+
+[lanes.horizon]
+# Competition 2, wired but not open: its commitments are read and taken in, no epoch is scored,
+# and it pays nothing. A share above zero must name `serve_as` - a model served as the user
+# running the validator could read the answer key of the episode it is being scored on.
+share = 0.0
+# The schedule is the chain's: the block the first epoch opened at, and how long each one takes.
+# 100 blocks on the localnet, where blocks are 250 ms.
+genesis_block = 1
+window_blocks = 100
+store = "var/localnet/horizon/store"
+epochs = "var/localnet/horizon/epochs"
+key = "var/localnet/horizon-keys/horizon.ed25519"

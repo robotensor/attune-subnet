@@ -3,7 +3,7 @@
 import sys
 import time
 
-from robotensor_subnet.supervisor import RESTART_S, Worker, worker_argv
+from robotensor.supervisor import RESTART_S, Worker, worker_argv
 
 
 class Cfg:
@@ -17,7 +17,7 @@ class Cfg:
 def test_a_worker_is_started_for_the_lane_it_runs(tmp_path):
     argv = worker_argv(Cfg(tmp_path / "c.toml", ["vector"]), "vector", once=True)
 
-    assert argv[:3] == [sys.executable, "-m", "robotensor_subnet.worker"]
+    assert argv[:3] == [sys.executable, "-m", "robotensor.worker"]
     assert argv[-3:] == ["--lane", "vector", "--once"]
     assert str(tmp_path / "c.toml") in argv
 

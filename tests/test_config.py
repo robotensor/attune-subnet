@@ -2,7 +2,7 @@
 
 import pytest
 
-from robotensor_subnet.config import ConfigError, load
+from robotensor.config import ConfigError, load
 
 GOOD = """
 [chain]

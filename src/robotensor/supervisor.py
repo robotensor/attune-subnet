@@ -77,7 +77,7 @@ def worker_argv(cfg: Config, lane: str, *, once: bool) -> list[str]:
     argv = [
         sys.executable,
         "-m",
-        "robotensor_subnet.worker",
+        "robotensor.worker",
         "--config",
         str(cfg.path),
         "--lane",

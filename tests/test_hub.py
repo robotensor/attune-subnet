@@ -4,7 +4,7 @@ import hashlib
 
 import pytest
 
-from robotensor_subnet.hub import (
+from robotensor.hub import (
     FETCH_MAX_BYTES,
     HubFile,
     NotASubmission,

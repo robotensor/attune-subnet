@@ -5,7 +5,7 @@ import os
 import sys
 import time
 
-from robotensor_subnet.compute import Broker, Lease, applied
+from robotensor.compute import Broker, Lease, applied
 
 
 def test_a_lane_with_its_own_cards_waits_for_nobody(tmp_path):

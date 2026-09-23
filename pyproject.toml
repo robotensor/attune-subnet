@@ -3,7 +3,7 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "robotensor-subnet"
+name = "robotensor"
 version = "0.1.0"
 description = "The Robotensor Bittensor subnet: miner and validator for the Vector competition (Competition 1)."
 readme = "README.md"
@@ -19,11 +19,14 @@ dependencies = ["bittensor==10.5.0", "huggingface_hub>=1.0"]
 dev = ["pytest>=8", "ruff==0.16.7"]
 
 [project.scripts]
-robotensor-miner = "robotensor_subnet.miner:main"
-robotensor-validator = "robotensor_subnet.validator:main"
+robotensor-miner = "robotensor.miner:main"
+robotensor-validator = "robotensor.validator:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/robotensor_subnet"]
+packages = ["src/robotensor"]
+# The name the package had before it was something you install from an index, so a script that
+# still imports it says so rather than failing.
+force-include = { "src/robotensor_subnet.py" = "robotensor_subnet.py" }
 
 [tool.ruff]
 line-length = 100

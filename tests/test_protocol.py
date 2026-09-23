@@ -2,8 +2,8 @@
 
 import pytest
 
-from robotensor_subnet.protocol import commitment, seed
-from robotensor_subnet.protocol.weights import Lane, weight_vector
+from robotensor.protocol import commitment, seed
+from robotensor.protocol.weights import Lane, weight_vector
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
 

@@ -4,7 +4,7 @@ import json
 import multiprocessing as mp
 import time
 
-from robotensor_subnet.state import EMPTY, State
+from robotensor.state import EMPTY, State
 
 
 def test_each_lane_has_a_document_of_its_own(tmp_path):

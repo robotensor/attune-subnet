@@ -5,11 +5,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from robotensor_subnet.chain import Commitment
-from robotensor_subnet.config import VectorConfig
-from robotensor_subnet.lanes.vector import Entry, VectorLane
-from robotensor_subnet.protocol import commitment
-from robotensor_subnet.state import State
+from robotensor.chain import Commitment
+from robotensor.config import VectorConfig
+from robotensor.lanes.vector import Entry, VectorLane
+from robotensor.protocol import commitment
+from robotensor.state import State
 
 pytest.importorskip("vector_orchestrator")
 
@@ -145,7 +145,7 @@ def test_the_empty_store_has_no_king_and_no_champions(lane):
 
 def test_the_lane_is_what_the_validator_asks_of_a_competition(lane):
     """The shape the loop drives, so a second competition can be driven by the same loop."""
-    from robotensor_subnet.lanes.base import Lane
+    from robotensor.lanes.base import Lane
 
     assert isinstance(lane, Lane)
     assert lane.name == "vector"
@@ -156,7 +156,7 @@ def test_a_step_reports_the_engines_failure_rather_than_raising_it(lane, monkeyp
     install the other's engine, so a lane's own failures come back as a `Progress`."""
     from vector_orchestrator.duel.orchestrate import DuelFailed
 
-    from robotensor_subnet.lanes.base import FAILED
+    from robotensor.lanes.base import FAILED
 
     monkeypatch.setattr(type(lane), "ready", lambda self: False)
     monkeypatch.setattr(
@@ -170,8 +170,8 @@ def test_a_step_reports_the_engines_failure_rather_than_raising_it(lane, monkeyp
 
 
 def test_a_seed_block_that_is_not_final_yet_is_waiting_not_a_failure(lane, monkeypatch):
-    from robotensor_subnet.lanes.base import WAITING
-    from robotensor_subnet.protocol import seed as seed_
+    from robotensor.lanes.base import WAITING
+    from robotensor.protocol import seed as seed_
 
     monkeypatch.setattr(type(lane), "ready", lambda self: True)
     entry = Entry("k", "hk", "m/one", A, 10, "queued")

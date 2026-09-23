@@ -21,13 +21,13 @@ bash scripts/localnet.sh up
 "${PY}" scripts/localnet_setup.py
 NETUID=$(sed -n 's/^netuid = //p' "${CONFIG}")
 
-"${PY}" -m robotensor_subnet.miner commit --repo robotensor/vector-update1 --revision "${UPDATE1_SHA}" \
+"${PY}" -m robotensor.miner commit --repo robotensor/vector-update1 --revision "${UPDATE1_SHA}" \
     --netuid "${NETUID}" --network ws://127.0.0.1:9944 \
     --wallet.name miner2 --wallet.hotkey default --wallet.path var/wallets
 
 # First step: intake, and the genesis of the baseline on the empty throne.
-"${PY}" -m robotensor_subnet.validator --config "${CONFIG}" run --once --no-weights
+"${PY}" -m robotensor.validator --config "${CONFIG}" run --once --no-weights
 # Second step: the duel of miner2's commitment against the king.
-"${PY}" -m robotensor_subnet.validator --config "${CONFIG}" run --once --no-weights
-"${PY}" -m robotensor_subnet.validator --config "${CONFIG}" status
-"${PY}" -m robotensor_subnet.validator --config "${CONFIG}" weights
+"${PY}" -m robotensor.validator --config "${CONFIG}" run --once --no-weights
+"${PY}" -m robotensor.validator --config "${CONFIG}" status
+"${PY}" -m robotensor.validator --config "${CONFIG}" weights

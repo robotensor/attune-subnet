@@ -307,7 +307,48 @@ class HorizonLane:
             return Progress(LANE, FAILED, f"epoch {name}: {verb} exited {done.returncode}")
         with self.state.writing(LANE) as doc:
             doc.setdefault("epochs", {}).setdefault(name, {})["stage"] = verb
+        if verb == "close" and not self.cfg.dry_run:
+            self._won(engine, window, name)
         return Progress(LANE, WORKED, f"epoch {name}: {verb}")
+
+    def _won(self, engine: epochs_.Engine, window: schedule_.Window, name: str) -> None:
+        """Read who the closed epoch ranked first, and note the hotkey that committed them.
+
+        The winner is read back from the signed record, never from what this validator thought was
+        happening while the epoch ran: the record is the thing every other reader can check, and a
+        weight vector built from anything else could not be checked at all. A dry run publishes no
+        record and pays nobody, which is what makes it a rehearsal.
+        """
+        from horizon_competition import store as store_
+        from horizon_competition import submissions
+
+        try:
+            record = store_.read(engine.store, f"epoch-{name}")
+        except Exception as exc:  # noqa: BLE001 - a missing record is reported, not raised
+            log.warning("horizon: epoch %s closed but its record cannot be read: %s", name, exc)
+            return
+        ranked = ((record.get("record") or record).get("scores") or {}).get("rank") or []
+        if not ranked:
+            log.info("horizon: epoch %s ranked nobody", name)
+            return
+        first = str(ranked[0])
+        entries = self.state.lane(LANE)["entries"]
+        hotkey = next(
+            (
+                one.get("hotkey")
+                for one in entries.values()
+                if submissions.key_for(str(one["repo"]), str(one["revision"])) == first
+            ),
+            None,
+        )
+        if hotkey is None:
+            log.warning("horizon: epoch %s was won by %s, which no commitment names", name, first)
+            return
+        with self.state.writing(LANE) as doc:
+            winners = doc.setdefault("winners", [])
+            if not any(w.get("epoch") == window.number for w in winners):
+                winners.append({"epoch": window.number, "key": first, "hotkey": hotkey})
+        log.info("horizon: epoch %s was won by %s (%s)", name, first, hotkey)
 
     def _register(self, engine: epochs_.Engine, window: schedule_.Window) -> None:
         """Put the epoch's entrants into the register the engine reads.

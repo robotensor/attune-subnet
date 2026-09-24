@@ -247,3 +247,79 @@ def test_a_verb_that_fails_is_reported_and_not_noted(lane, tmp_path, monkeypatch
 
     assert progress.outcome == FAILED and "exited 2" in progress.detail
     assert not (lane.state.lane("horizon").get("epochs") or {}).get("e00001")
+
+
+def closed_epoch(lane, tmp_path, monkeypatch, *, rank, dry_run=False):
+    """Run the last verb of an epoch whose store holds `rank`, and return the lane's winners."""
+    from horizon_competition import submissions
+
+    engine_config = tmp_path / "competition.yml"
+    engine_config.write_text("axes: {}\n")
+    object.__setattr__(lane.cfg, "competition", engine_config)
+    object.__setattr__(lane.cfg, "epochs", tmp_path / "epochs")
+    object.__setattr__(lane.cfg, "store", tmp_path / "store")
+    object.__setattr__(lane.cfg, "dry_run", dry_run)
+    directory = tmp_path / "epochs" / "e00001"
+    directory.mkdir(parents=True)
+    for name in ("epoch.json", "pool_manifest.json", "shortlist.json", "scores.json"):
+        (directory / name).write_text("{}")
+    # The drains leave no file of their own, so the lane noted them as they finished.
+    lane.state.lane("horizon").setdefault("epochs", {})["e00001"] = {"stage": "full"}
+    lane.state.save()  # as intake leaves it: on disk, because `writing` re-reads under the lock
+    monkeypatch.setattr(
+        "robotensor.lanes.horizon.subprocess.run", lambda argv, **k: SimpleNamespace(returncode=0)
+    )
+    monkeypatch.setattr(
+        "horizon_competition.store.read",
+        lambda store, name: {"scores": {"rank": rank}},
+    )
+    lane.step(SimpleNamespace(block=lambda: 1250))
+    return lane.state.lane("horizon").get("winners") or [], submissions
+
+
+def test_the_winner_is_read_back_from_the_signed_record(lane, tmp_path, monkeypatch):
+    """Never from what this validator thought was happening: the record is the thing every other
+    reader can check."""
+    from horizon_competition import submissions
+
+    lane.state.lane("horizon")["entries"]["m/one@" + A] = {
+        "hotkey": "hk1",
+        "repo": "m/one",
+        "revision": A,
+        "commit_block": 1150,
+        "epoch": 1,
+        "status": "queued",
+    }
+    key = submissions.key_for("m/one", A)
+
+    winners, _ = closed_epoch(lane, tmp_path, monkeypatch, rank=[key, "other"])
+
+    assert winners == [{"epoch": 1, "key": key, "hotkey": "hk1"}]
+    award = lane.award()
+    assert list(award.entries) == ["hk1"] and award.keep == 1 and award.decay == 0.0
+
+
+def test_a_rehearsal_pays_nobody(lane, tmp_path, monkeypatch):
+    """A dry run publishes no record; recording a winner from one would pay for a rehearsal."""
+    from horizon_competition import submissions
+
+    lane.state.lane("horizon")["entries"]["m/one@" + A] = {
+        "hotkey": "hk1",
+        "repo": "m/one",
+        "revision": A,
+        "commit_block": 1150,
+        "epoch": 1,
+        "status": "queued",
+    }
+    key = submissions.key_for("m/one", A)
+
+    winners, _ = closed_epoch(lane, tmp_path, monkeypatch, rank=[key], dry_run=True)
+
+    assert winners == [] and list(lane.award().entries) == []
+
+
+def test_a_winner_no_commitment_names_is_not_paid(lane, tmp_path, monkeypatch):
+    """The engine's register can hold an entry this chain never accepted; it is not a hotkey."""
+    winners, _ = closed_epoch(lane, tmp_path, monkeypatch, rank=["somebody__else@1234abcd-0f0f0f"])
+
+    assert winners == []

@@ -69,7 +69,12 @@ class State:
     def writing(self, name: str) -> Iterator[dict[str, Any]]:
         """The lane's document, held under its lock for as long as the block runs and written at
         the end. Use it where a read and the write that follows must not be split by anyone
-        else - taking a block number, settling an entry."""
+        else - taking a block number, settling an entry.
+
+        It re-reads the document from disk, so anything changed in memory and not saved is gone:
+        that is the point, because what another process wrote must not be written over by a copy
+        this one has been holding.
+        """
         path = self.path(name)
         with _locked(path):
             doc = self._read(path)

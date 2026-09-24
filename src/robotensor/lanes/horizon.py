@@ -25,6 +25,8 @@ episode it is being scored on.
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,11 +36,15 @@ from ..config import HorizonConfig
 from ..protocol import commitment as commitment_
 from ..protocol import schedule as schedule_
 from ..state import PENDING, QUEUED, State
-from .base import IDLE, WAITING, Award, Progress
+from . import epochs as epochs_
+from .base import FAILED, IDLE, WAITING, WORKED, Award, Progress
 
 log = logging.getLogger(__name__)
 
 LANE = "horizon"
+#: What an epoch is called, from the number the chain gives it. Two validators agree on it
+#: because they agree on the number, and it sorts the way it is counted.
+EPOCH_ID = "e{number:05d}"
 #: What a submission holds, when the runtime cannot be asked: the layout of the family shipped
 #: with it. `shape` prefers the runtime's own answer, which is the one it hashes.
 DEFAULT_LAYOUT = {
@@ -230,19 +236,100 @@ class HorizonLane:
     # -- the validator's view ----------------------------------------------------------------
 
     def step(self, chain: Any) -> Progress:
-        """Where the epoch stands. Scoring one is the next stage; until then this says so."""
+        """One verb of the epoch whose window has closed, or a word about the one still open.
+
+        An epoch runs after its window closes and its seed block is final, so there is only ever
+        one to work on: the window before this one. Each call runs a single verb, because one of
+        them can take hours and the loop must be able to die between any two.
+        """
         head = chain.block()
         try:
             window = self.schedule.at(head)
         except schedule_.NotYet as exc:
             return Progress(LANE, WAITING, str(exc))
         entrants = self.entrants(window.number)
-        detail = (
+        open_now = (
             f"epoch {window.number} is open until block {window.closes} "
-            f"({window.closes - head} to go), {len(entrants)} entrants; "
-            "nothing scores them yet"
+            f"({window.closes - head} to go), {len(entrants)} entrants"
         )
-        return Progress(LANE, IDLE, detail)
+        if window.number == 0:
+            return Progress(LANE, IDLE, f"{open_now}; none has closed yet")
+        running = self.schedule.window(window.number - 1)
+        if not running.seed_ready(head):
+            return Progress(
+                LANE, WAITING, f"{open_now}; epoch {running.number}'s seed is not final"
+            )
+        engine = self.engine()
+        if engine is None:
+            return Progress(LANE, IDLE, f"{open_now}; no engine configured to score them")
+        return self._run(engine, running, chain, open_now)
+
+    def engine(self) -> epochs_.Engine | None:
+        """How to call the engine on this host, or None when none is configured."""
+        if not self.cfg.competition:
+            return None
+        return epochs_.Engine(
+            python=self.cfg.engine_python or sys.executable,
+            config=self.cfg.competition,
+            store=self.cfg.store,
+            keys=self.cfg.key.parent,
+            epochs=self.cfg.epochs,
+            models=self.cfg.models,
+            runtime_python=self.cfg.runtime_python,
+            serve_as=self.cfg.serve_as,
+            devices=self.cfg.devices,
+        )
+
+    def _run(
+        self, engine: epochs_.Engine, window: schedule_.Window, chain: Any, open_now: str
+    ) -> Progress:
+        """Run the next verb of `window`'s epoch, and note it when it finishes."""
+        name = EPOCH_ID.format(number=window.number)
+        lane = self.state.lane(LANE)
+        noted = (lane.get("epochs") or {}).get(name) or {}
+        plan = epochs_.Plan(
+            engine.directory(name), stage=str(noted.get("stage", "")), dry_run=self.cfg.dry_run
+        )
+        verb = plan.next()
+        if verb is None:
+            return Progress(LANE, IDLE, f"{open_now}; epoch {window.number} is finished")
+        if verb == "open":
+            if not engine.store_ready:
+                log.info("horizon: making the signed store at %s", engine.store)
+                made = subprocess.run(engine.store_argv(), check=False)
+                if made.returncode != 0:
+                    return Progress(LANE, FAILED, f"store init exited {made.returncode}")
+            self._register(engine, window)
+        argv = engine.argv(verb, name, profile=self.cfg.profile, dry_run=self.cfg.dry_run)
+        log.info("horizon: epoch %s: %s", name, verb)
+        done = subprocess.run(argv, capture_output=False, check=False)
+        if done.returncode != 0:
+            return Progress(LANE, FAILED, f"epoch {name}: {verb} exited {done.returncode}")
+        with self.state.writing(LANE) as doc:
+            doc.setdefault("epochs", {}).setdefault(name, {})["stage"] = verb
+        return Progress(LANE, WORKED, f"epoch {name}: {verb}")
+
+    def _register(self, engine: epochs_.Engine, window: schedule_.Window) -> None:
+        """Put the epoch's entrants into the register the engine reads.
+
+        The chain is this competition's gate: what a hotkey committed, and the content key intake
+        worked out from the Hub, are what the engine signs into its store. Nothing here recomputes
+        that hash, and nothing takes one from a sender.
+        """
+        from horizon_competition import submissions
+
+        for entry in self.entrants(window.number):
+            record = self.state.lane(LANE)["entries"].get(entry.key) or {}
+            submissions.add(
+                engine.store,
+                store_dir=engine.store,
+                key_dir=engine.keys,
+                participant=entry.hotkey,
+                repo=entry.repo,
+                revision=entry.revision,
+                weights_sha256=str(record.get("weights_sha256", "")),
+                source="chain",
+            )
 
     def award(self) -> Award:
         """Winner takes all, per epoch: the newest closed epoch's winner and nobody else.

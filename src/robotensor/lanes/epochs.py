@@ -95,6 +95,24 @@ class Engine:
     def directory(self, epoch: str) -> Path:
         return self.epochs / epoch
 
+    def store_argv(self) -> list[str]:
+        """`store init`: the signed store and the key that signs it, made once."""
+        return [
+            self.python,
+            "-m",
+            "horizon_competition.cli",
+            "store",
+            "init",
+            "--store",
+            str(self.store),
+            "--keys",
+            str(self.keys),
+        ]
+
+    @property
+    def store_ready(self) -> bool:
+        return (self.store / "index.json").is_file()
+
     def argv(self, verb: str, epoch: str, *, profile: str = "", dry_run: bool = False) -> list[str]:
         """The command for one verb, as the engine's own CLI takes it."""
         directory = str(self.directory(epoch))

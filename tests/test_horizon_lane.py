@@ -7,7 +7,7 @@ import pytest
 
 from robotensor.chain import Commitment
 from robotensor.config import ConfigError, HorizonConfig
-from robotensor.lanes.base import IDLE, Lane
+from robotensor.lanes.base import IDLE, WAITING, Lane
 from robotensor.lanes.horizon import HorizonLane
 from robotensor.protocol import commitment
 from robotensor.state import State
@@ -130,12 +130,32 @@ def test_a_shard_that_is_not_in_lfs_is_refused_rather_than_downloaded(lane):
     assert entry.status == "refused"
 
 
-def test_a_step_says_where_the_epoch_stands_and_that_nothing_scores_it_yet(lane):
+def test_a_step_says_where_the_open_epoch_stands(lane):
     progress = lane.step(SimpleNamespace(block=lambda: 1150))
 
     assert progress.outcome == IDLE
     assert "epoch 1 is open until block 1200" in progress.detail
-    assert "nothing scores them yet" in progress.detail
+
+
+def test_with_no_engine_configured_nothing_scores_the_closed_epoch(lane):
+    """A validator that runs only the other competition says so, rather than failing."""
+    progress = lane.step(SimpleNamespace(block=lambda: 1150))
+
+    assert "no engine configured to score them" in progress.detail
+
+
+def test_an_epoch_waits_until_its_seed_block_is_final(lane):
+    """The units are drawn from a block after the window closed; reading it early would read a
+    block that can still be reorganised."""
+    progress = lane.step(SimpleNamespace(block=lambda: 1101))
+
+    assert progress.outcome == WAITING and "seed is not final" in progress.detail
+
+
+def test_the_first_epoch_has_nothing_before_it(lane):
+    progress = lane.step(SimpleNamespace(block=lambda: 1050))
+
+    assert progress.outcome == IDLE and "none has closed yet" in progress.detail
 
 
 def test_with_no_closed_epoch_there_is_nobody_to_pay(lane):
@@ -177,3 +197,53 @@ def test_the_shape_comes_from_the_runtime_that_will_serve_it(lane):
     assert lane.shape.key == "listing"
     assert f"{family.weights['directory']}/*.safetensors" in lane.shape.hashed
     assert family_module.KNOBS_FILE in lane.shape.hashed
+
+
+def test_a_step_runs_one_verb_and_notes_it(lane, tmp_path, monkeypatch):
+    """One of them can take hours, so the loop does one and comes back."""
+    from robotensor.lanes.base import WORKED
+
+    engine_config = tmp_path / "competition.yml"
+    engine_config.write_text("axes: {}\n")
+    object.__setattr__(lane.cfg, "competition", engine_config)
+    object.__setattr__(lane.cfg, "epochs", tmp_path / "epochs")
+    ran = []
+
+    def fake_run(argv, **kwargs):
+        ran.append(argv)
+        (tmp_path / "epochs" / "e00001").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "epochs" / "e00001" / "epoch.json").write_text("{}")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("robotensor.lanes.horizon.subprocess.run", fake_run)
+    monkeypatch.setattr(type(lane), "_register", lambda self, engine, window: None)
+
+    progress = lane.step(SimpleNamespace(block=lambda: 1250))
+
+    assert progress.outcome == WORKED and progress.detail == "epoch e00001: open"
+    # The store and the key that signs it are made once, before the first epoch is opened.
+    assert [argv[3:5] for argv in ran] == [["store", "init"], ["epoch", "open"]]
+    assert lane.state.lane("horizon")["epochs"]["e00001"]["stage"] == "open"
+
+    # The next step picks the epoch up where the engine left it.
+    ran.clear()
+    monkeypatch.setattr("robotensor.lanes.horizon.subprocess.run", fake_run)
+    assert lane.step(SimpleNamespace(block=lambda: 1250)).detail == "epoch e00001: pool"
+
+
+def test_a_verb_that_fails_is_reported_and_not_noted(lane, tmp_path, monkeypatch):
+    from robotensor.lanes.base import FAILED
+
+    engine_config = tmp_path / "competition.yml"
+    engine_config.write_text("axes: {}\n")
+    object.__setattr__(lane.cfg, "competition", engine_config)
+    object.__setattr__(lane.cfg, "epochs", tmp_path / "epochs")
+    monkeypatch.setattr(
+        "robotensor.lanes.horizon.subprocess.run", lambda argv, **k: SimpleNamespace(returncode=2)
+    )
+    monkeypatch.setattr(type(lane), "_register", lambda self, engine, window: None)
+
+    progress = lane.step(SimpleNamespace(block=lambda: 1250))
+
+    assert progress.outcome == FAILED and "exited 2" in progress.detail
+    assert not (lane.state.lane("horizon").get("epochs") or {}).get("e00001")

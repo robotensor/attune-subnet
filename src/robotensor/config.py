@@ -106,6 +106,15 @@ class HorizonConfig(LaneConfig):
     private_window_blocks: int = 300
     #: A submission's cap: shards, statistics and the knobs file together.
     max_repo_bytes: int = 53687091200  # 50 GB
+    #: Where the intake puts a checked submission's weights: `<models>/<key>`.
+    models: Path = Path()
+    #: The interpreter of the model runtime environment, which serves a submission.
+    runtime_python: str = ""
+    #: Which of the engine's profiles an epoch runs (`smoke` is one task an axis); empty for the
+    #: config's own default.
+    profile: str = ""
+    #: Rehearse: score beside the real scores and publish nothing at close.
+    dry_run: bool = False
 
 
 HORIZON_KEYS = tuple(
@@ -240,6 +249,10 @@ def _horizon(name: str, table: dict[str, Any], base: Path, path: Path) -> Horizo
         devices=tuple(int(d) for d in (table.get("devices") or ())),
         private_window_blocks=int(table.get("private_window_blocks", 300)),
         max_repo_bytes=int(table.get("max_repo_bytes", 53687091200)),
+        models=_path(base, table.get("models", "var/horizon/models")),
+        runtime_python=os.path.expandvars(str(table.get("runtime_python", ""))),
+        profile=str(table.get("profile", "")),
+        dry_run=bool(table.get("dry_run", False)),
     )
 
 

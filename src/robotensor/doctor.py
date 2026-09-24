@@ -185,6 +185,47 @@ def _serve_as(lane_cfg: Any) -> tuple[bool, str]:
     return True, f"models are served as {lane_cfg.serve_as}"
 
 
+def _horizon_engine(lane_cfg: Any) -> tuple[bool, str]:
+    """What the engine says about this host, in the engine's own words.
+
+    `config check` already answers "can this machine run an epoch?" better than anything here
+    could: it resolves every path the config names and asks each benchmark fork about its task
+    config and its tasks. Repeating that badly would be worse than quoting it.
+    """
+    import subprocess
+
+    if not lane_cfg.competition:
+        return True, "no engine config named ([lanes.horizon].competition); nothing to run yet"
+    python = lane_cfg.engine_python or sys.executable
+    done = subprocess.run(
+        [
+            python,
+            "-m",
+            "horizon_competition.cli",
+            "config",
+            "check",
+            "--config",
+            str(lane_cfg.competition),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+    if done.returncode == 0:
+        return True, f"{lane_cfg.competition.name}: every axis this host is asked for"
+    problems = []
+    for line in (done.stderr + done.stdout).splitlines():  # it writes its refusals to stderr
+        if line.startswith("not checked"):  # what the problems above stopped it looking at
+            break
+        if line.startswith("  - "):
+            problems.append(line[4:].split(" (WORKSPACE")[0])
+    if not problems:
+        return False, done.stderr.strip()[-200:] or "the engine refused its config"
+    said = "; ".join(problems[:2])
+    more = f" (+{len(problems) - 2} more)" if len(problems) > 2 else ""
+    return False, f"{said}{more}"
+
+
 def _vector_contract(lane_cfg: Any) -> tuple[bool, str]:
     from vector_orchestrator.spec import load_spec_file
 
@@ -251,6 +292,7 @@ def validator_checks(cfg: Any, competition: str) -> list[Check]:
                 lambda: _serve_as(lane_cfg),
             ),
             _check("runtime", lambda: _interpreter(sys.executable, ("horizon_runtime_zerowam",))),
+            _check("engine", lambda: _horizon_engine(lane_cfg)),
         ]
     if competition == "vector":
         checks += [

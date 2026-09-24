@@ -51,3 +51,5 @@ window_blocks = 100
 store = "var/localnet/horizon/store"
 epochs = "var/localnet/horizon/epochs"
 key = "var/localnet/horizon-keys/horizon.ed25519"
+# The engine's own configuration: what an epoch evaluates, and the forks that run it.
+competition = "/root/robotensor/horizon/horizon-competition/competition.yml"

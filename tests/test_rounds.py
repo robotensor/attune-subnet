@@ -18,7 +18,7 @@ def test_a_fresh_directory_starts_at_the_beginning(tmp_path):
 def test_what_the_engine_left_behind_says_what_has_run(tmp_path):
     """Nothing is kept in memory: the loop can die between any two verbs."""
     directory = tmp_path / "e"
-    leave(directory, "epoch.json")
+    leave(directory, "round.json")
 
     assert Plan(directory).next() == "pool"
 
@@ -27,9 +27,18 @@ def test_what_the_engine_left_behind_says_what_has_run(tmp_path):
     assert Plan(directory).next() == "screen"
 
 
-def test_the_two_drains_are_read_from_the_note_they_leave_none(tmp_path):
+def test_a_round_opened_before_the_rename_is_carried_on_not_opened_again(tmp_path):
+    """Its directory holds `epoch.json`, what `open` wrote then: what is there decides."""
     directory = tmp_path / "e"
     leave(directory, "epoch.json")
+
+    assert Plan(directory).finished("open")
+    assert Plan(directory).next() == "pool"
+
+
+def test_the_two_drains_are_read_from_the_note_they_leave_none(tmp_path):
+    directory = tmp_path / "e"
+    leave(directory, "round.json")
     leave(directory, "pool_manifest.json")
 
     assert Plan(directory, stage="screen").next() == "shortlist"
@@ -43,7 +52,7 @@ def test_the_two_drains_are_read_from_the_note_they_leave_none(tmp_path):
 def test_a_note_one_step_stale_costs_a_re_run_and_never_a_wrong_result(tmp_path):
     """The engine's drains skip what is already there, so re-running one is a re-scan."""
     directory = tmp_path / "e"
-    for name in ("epoch.json", "pool_manifest.json", "shortlist.json"):
+    for name in ("round.json", "pool_manifest.json", "shortlist.json"):
         leave(directory, name)
 
     # The note says the screen finished; the full stage's own note was lost.
@@ -52,7 +61,7 @@ def test_a_note_one_step_stale_costs_a_re_run_and_never_a_wrong_result(tmp_path)
 
 def test_a_dry_run_scores_beside_the_real_thing(tmp_path):
     directory = tmp_path / "e"
-    for name in ("epoch.json", "pool_manifest.json", "shortlist.json"):
+    for name in ("round.json", "pool_manifest.json", "shortlist.json"):
         leave(directory, name)
     leave(directory, "scores-dry-run.json")
 
@@ -62,7 +71,7 @@ def test_a_dry_run_scores_beside_the_real_thing(tmp_path):
 
 def test_a_round_that_has_run_every_verb_is_finished(tmp_path):
     directory = tmp_path / "e"
-    for name in ("epoch.json", "pool_manifest.json", "shortlist.json", "scores.json"):
+    for name in ("round.json", "pool_manifest.json", "shortlist.json", "scores.json"):
         leave(directory, name)
 
     assert Plan(directory, stage="close").next() is None
@@ -87,7 +96,7 @@ def engine(tmp_path):
 def test_open_names_the_store_the_keys_and_the_register(engine):
     argv = engine.argv("open", "2026-W39", profile="smoke")
 
-    assert argv[:5] == ["/usr/bin/python3", "-m", "horizon_competition.cli", "epoch", "open"]
+    assert argv[:5] == ["/usr/bin/python3", "-m", "horizon_competition.cli", "round", "open"]
     assert "--profile" in argv and argv[argv.index("--profile") + 1] == "smoke"
     assert str(engine.store) in argv and str(engine.keys) in argv
 
@@ -96,8 +105,18 @@ def test_the_screening_stage_is_the_drain_told_to_screen_only(engine):
     screen = engine.argv("screen", "2026-W39")
     full = engine.argv("full", "2026-W39")
 
-    assert screen[:6] == [*full[:5], "--epoch"] and screen[-1] == "--screen-only"
+    assert screen[:6] == [*full[:5], "--round"] and screen[-1] == "--screen-only"
     assert "--screen-only" not in full
+
+
+@pytest.mark.parametrize("verb", STEPS)
+def test_every_verb_is_the_engines_round_command_on_the_rounds_directory(engine, verb):
+    """The engine has no `epoch` group any more, and no `--epoch` flag to take a directory."""
+    argv = engine.argv(verb, "e00007")
+
+    assert argv[3] == "round"
+    assert argv[argv.index("--round") + 1] == str(engine.rounds / "e00007")
+    assert "epoch" not in argv and "--epoch" not in argv
 
 
 def test_a_served_model_runs_as_the_user_the_config_names(engine):

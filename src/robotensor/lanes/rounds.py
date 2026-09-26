@@ -19,6 +19,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 #: The engine's files that say a verb finished.
+ROUND_JSON = "round.json"
+#: What `open` left before the engine called its rounds epochs no more. A round directory is read
+#: by what is in it: one holding this was opened, and is carried on, not opened again.
 EPOCH_JSON = "epoch.json"
 POOL_MANIFEST_JSON = "pool_manifest.json"
 SHORTLIST_JSON = "shortlist.json"
@@ -28,11 +31,11 @@ DRY_RUN_SCORES_JSON = "scores-dry-run.json"
 #: The order a round is run in. `screen` and `full` are the engine's two drains: the screening
 #: stage every entrant runs, and the full stage the shortlist runs.
 STEPS = ("open", "pool", "screen", "shortlist", "full", "score", "close")
-#: What each verb leaves behind, where it leaves one file.
+#: What each verb leaves behind, where it leaves one file; any one of them says it ran.
 MARKERS = {
-    "open": EPOCH_JSON,
-    "pool": POOL_MANIFEST_JSON,
-    "shortlist": SHORTLIST_JSON,
+    "open": (ROUND_JSON, EPOCH_JSON),
+    "pool": (POOL_MANIFEST_JSON,),
+    "shortlist": (SHORTLIST_JSON,),
 }
 
 
@@ -51,16 +54,17 @@ class Plan:
     dry_run: bool = False
     steps: Sequence[str] = STEPS
 
-    def marker(self, name: str) -> str | None:
+    def markers(self, name: str) -> tuple[str, ...]:
+        """The files `name` leaves behind; empty for a verb that leaves none of its own."""
         if name == "score":
-            return DRY_RUN_SCORES_JSON if self.dry_run else SCORES_JSON
-        return MARKERS.get(name)
+            return (DRY_RUN_SCORES_JSON if self.dry_run else SCORES_JSON,)
+        return MARKERS.get(name, ())
 
     def finished(self, name: str) -> bool:
         """Whether `name` has run: from what it left behind, or from the note."""
-        marker = self.marker(name)
-        if marker is not None:
-            return (self.directory / marker).is_file()
+        markers = self.markers(name)
+        if markers:
+            return any((self.directory / marker).is_file() for marker in markers)
         if not self.stage or self.stage not in self.steps:
             return False
         return self.steps.index(name) <= self.steps.index(self.stage)
@@ -117,16 +121,17 @@ class Engine:
     def argv(
         self, verb: str, round_id: str, *, profile: str = "", dry_run: bool = False
     ) -> list[str]:
-        """The command for one verb, as the engine's own CLI takes it."""
+        """The command for one verb, as the engine's own CLI takes it: `round <verb> --round
+        <directory>`. The engine keeps no `epoch` spelling of its commands."""
         directory = str(self.directory(round_id))
-        head = [self.python, "-m", "horizon_competition.cli", "epoch"]
+        head = [self.python, "-m", "horizon_competition.cli", "round"]
         if verb == "open":
             argv = [
                 *head,
                 "open",
                 "--config",
                 str(self.config),
-                "--epoch",
+                "--round",
                 directory,
                 "--store",
                 str(self.store),
@@ -139,12 +144,12 @@ class Engine:
                 argv += ["--runtime-python", self.runtime_python]
             return [*argv, "--profile", profile] if profile else argv
         if verb == "pool":
-            return [*head, "pool", "--epoch", directory]
+            return [*head, "pool", "--round", directory]
         if verb in ("screen", "full"):
             argv = [
                 *head,
                 "drain",
-                "--epoch",
+                "--round",
                 directory,
                 "--models",
                 str(self.models),
@@ -159,15 +164,15 @@ class Engine:
                 argv += ["--gpus", ",".join(str(d) for d in self.devices)]
             return [*argv, "--screen-only"] if verb == "screen" else argv
         if verb == "shortlist":
-            return [*head, "shortlist", "--epoch", directory]
+            return [*head, "shortlist", "--round", directory]
         if verb == "score":
-            argv = [*head, "score", "--epoch", directory, "--register", str(self.store)]
+            argv = [*head, "score", "--round", directory, "--register", str(self.store)]
             return [*argv, "--dry-run"] if dry_run else argv
         if verb == "close":
             argv = [
                 *head,
                 "close",
-                "--epoch",
+                "--round",
                 directory,
                 "--store",
                 str(self.store),

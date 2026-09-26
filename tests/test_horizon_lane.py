@@ -212,7 +212,7 @@ def test_a_step_runs_one_verb_and_notes_it(lane, tmp_path, monkeypatch):
     def fake_run(argv, **kwargs):
         ran.append(argv)
         (tmp_path / "epochs" / "e00001").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "epochs" / "e00001" / "epoch.json").write_text("{}")
+        (tmp_path / "epochs" / "e00001" / "round.json").write_text("{}")
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr("robotensor.lanes.horizon.subprocess.run", fake_run)
@@ -222,7 +222,7 @@ def test_a_step_runs_one_verb_and_notes_it(lane, tmp_path, monkeypatch):
 
     assert progress.outcome == WORKED and progress.detail == "round e00001: open"
     # The store and the key that signs it are made once, before the first round is opened.
-    assert [argv[3:5] for argv in ran] == [["store", "init"], ["epoch", "open"]]
+    assert [argv[3:5] for argv in ran] == [["store", "init"], ["round", "open"]]
     assert lane.state.lane("horizon")["epochs"]["e00001"]["stage"] == "open"
 
     # The next step picks the round up where the engine left it.
@@ -261,7 +261,7 @@ def closed_round(lane, tmp_path, monkeypatch, *, rank, dry_run=False):
     object.__setattr__(lane.cfg, "dry_run", dry_run)
     directory = tmp_path / "epochs" / "e00001"
     directory.mkdir(parents=True)
-    for name in ("epoch.json", "pool_manifest.json", "shortlist.json", "scores.json"):
+    for name in ("round.json", "pool_manifest.json", "shortlist.json", "scores.json"):
         (directory / name).write_text("{}")
     # The drains leave no file of their own, so the lane noted them as they finished.
     lane.state.lane("horizon").setdefault("epochs", {})["e00001"] = {"stage": "full"}

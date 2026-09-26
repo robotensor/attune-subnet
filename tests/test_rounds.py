@@ -2,7 +2,7 @@
 
 import pytest
 
-from robotensor.lanes.rounds import STEPS, Engine, Plan
+from robotensor.lanes.rounds import STEPS, Engine, Plan, opened
 
 
 def leave(directory, name):
@@ -99,6 +99,29 @@ def test_open_names_the_store_the_keys_and_the_register(engine):
     assert argv[:5] == ["/usr/bin/python3", "-m", "horizon_competition.cli", "round", "open"]
     assert "--profile" in argv and argv[argv.index("--profile") + 1] == "smoke"
     assert str(engine.store) in argv and str(engine.keys) in argv
+
+
+def test_open_after_the_previous_round_starts_where_that_one_closed(engine):
+    """Back to back, as the chain's windows are, however late the round is opened."""
+    previous = engine.directory("e00006")
+
+    argv = engine.argv("open", "e00007", after=previous)
+
+    assert argv[argv.index("--after") + 1] == str(previous)
+    assert "--after" not in engine.argv("open", "e00007"), "the first round follows nothing"
+
+
+@pytest.mark.parametrize("marker", ["round.json", "epoch.json"])
+def test_a_directory_is_an_opened_round_by_either_marker(tmp_path, marker):
+    directory = tmp_path / "e00006"
+    directory.mkdir()
+
+    assert not opened(directory), "a directory an open never finished in is not a round"
+    assert not opened(tmp_path / "e00005")
+
+    leave(directory, marker)
+
+    assert opened(directory)
 
 
 def test_the_screening_stage_is_the_drain_told_to_screen_only(engine):

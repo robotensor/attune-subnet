@@ -28,6 +28,7 @@ import logging
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .. import hub
@@ -295,6 +296,7 @@ class HorizonLane:
         verb = plan.next()
         if verb is None:
             return Progress(LANE, IDLE, f"{open_now}; round {window.number} is finished")
+        after = None
         if verb == "open":
             if not engine.store_ready:
                 log.info("horizon: making the signed store at %s", engine.store)
@@ -302,7 +304,10 @@ class HorizonLane:
                 if made.returncode != 0:
                     return Progress(LANE, FAILED, f"store init exited {made.returncode}")
             self._register(engine, window)
-        argv = engine.argv(verb, name, profile=self.cfg.profile, dry_run=self.cfg.dry_run)
+            after = self._previous(engine, window)
+        argv = engine.argv(
+            verb, name, profile=self.cfg.profile, dry_run=self.cfg.dry_run, after=after
+        )
         log.info("horizon: round %s: %s", name, verb)
         done = subprocess.run(argv, capture_output=False, check=False)
         if done.returncode != 0:
@@ -312,6 +317,19 @@ class HorizonLane:
         if verb == "close" and not self.cfg.dry_run:
             self._won(engine, window, name)
         return Progress(LANE, WORKED, f"round {name}: {verb}")
+
+    @staticmethod
+    def _previous(engine: rounds_.Engine, window: schedule_.Window) -> Path | None:
+        """The round before `window`'s, when it was opened here: the one this round follows on.
+
+        A round opened after it starts where it closed, as the chain's windows do. Without one - the
+        first round, or one after a week this validator never opened - there is nothing to follow,
+        and the round opens when it is opened.
+        """
+        if window.number < 1:
+            return None
+        directory = engine.directory(ROUND_ID.format(number=window.number - 1))
+        return directory if rounds_.opened(directory) else None
 
     def _won(self, engine: rounds_.Engine, window: schedule_.Window, name: str) -> None:
         """Read who the closed round ranked first, and note the hotkey that committed them.

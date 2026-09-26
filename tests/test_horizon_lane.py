@@ -231,6 +231,50 @@ def test_a_step_runs_one_verb_and_notes_it(lane, tmp_path, monkeypatch):
     assert lane.step(SimpleNamespace(block=lambda: 1250)).detail == "round e00001: pool"
 
 
+def opening(lane, tmp_path, monkeypatch):
+    """Step a lane whose round e00001 is next to open; the `round open` it ran."""
+    engine_config = tmp_path / "competition.yml"
+    engine_config.write_text("axes: {}\n")
+    object.__setattr__(lane.cfg, "competition", engine_config)
+    object.__setattr__(lane.cfg, "epochs", tmp_path / "epochs")
+    (tmp_path / "store").mkdir(exist_ok=True)
+    (tmp_path / "store" / "index.json").write_text("{}")
+    ran = []
+
+    def fake_run(argv, **kwargs):
+        ran.append(argv)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr("robotensor.lanes.horizon.subprocess.run", fake_run)
+    monkeypatch.setattr(type(lane), "_register", lambda self, engine, window: None)
+    lane.step(SimpleNamespace(block=lambda: 1250))
+    [opened] = [argv for argv in ran if argv[3:5] == ["round", "open"]]
+    return opened
+
+
+@pytest.mark.parametrize("marker", ["round.json", "epoch.json"])
+def test_a_round_opens_where_the_one_before_it_closed(lane, tmp_path, monkeypatch, marker):
+    """Back to back, like the chain's windows: after the previous round's directory, whichever
+    name its marker has - one opened before the rename holds `epoch.json`."""
+    previous = tmp_path / "epochs" / "e00000"
+    previous.mkdir(parents=True)
+    (previous / marker).write_text("{}")
+
+    argv = opening(lane, tmp_path, monkeypatch)
+
+    assert argv[argv.index("--after") + 1] == str(previous)
+
+
+def test_a_round_with_no_round_opened_before_it_follows_nothing(lane, tmp_path, monkeypatch):
+    """A week this validator never opened, or an open that never finished, has no close to
+    start from: the round opens when it is opened."""
+    assert "--after" not in opening(lane, tmp_path, monkeypatch)
+
+    (tmp_path / "epochs" / "e00000").mkdir(parents=True)
+
+    assert "--after" not in opening(lane, tmp_path, monkeypatch)
+
+
 def test_a_verb_that_fails_is_reported_and_not_noted(lane, tmp_path, monkeypatch):
     from robotensor.lanes.base import FAILED
 

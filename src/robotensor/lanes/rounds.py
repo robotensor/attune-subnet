@@ -39,6 +39,11 @@ MARKERS = {
 }
 
 
+def opened(directory: Path) -> bool:
+    """Whether a round was opened in `directory`, under either name its marker has had."""
+    return any((directory / marker).is_file() for marker in MARKERS["open"])
+
+
 @dataclass(frozen=True)
 class Plan:
     """Where one round has got to, and what to run next.
@@ -120,10 +125,21 @@ class Engine:
         return (self.store / "index.json").is_file()
 
     def argv(
-        self, verb: str, round_id: str, *, profile: str = "", dry_run: bool = False
+        self,
+        verb: str,
+        round_id: str,
+        *,
+        profile: str = "",
+        dry_run: bool = False,
+        after: Path | None = None,
     ) -> list[str]:
         """The command for one verb, as the engine's own CLI takes it: `round <verb> --round
-        <directory>`. The engine keeps no `epoch` spelling of its commands."""
+        <directory>`. The engine keeps no `epoch` spelling of its commands.
+
+        `after` is the previous round's directory, for `open`: the round then opens where that one
+        closed rather than when this command runs, so the published windows are back to back the
+        way the chain's are, however late a validator got round to opening it.
+        """
         directory = str(self.directory(round_id))
         head = [self.python, "-m", "horizon_competition.cli", "round"]
         if verb == "open":
@@ -143,6 +159,8 @@ class Engine:
             ]
             if self.runtime_python:
                 argv += ["--runtime-python", self.runtime_python]
+            if after is not None:
+                argv += ["--after", str(after)]
             return [*argv, "--profile", profile] if profile else argv
         if verb == "pool":
             return [*head, "pool", "--round", directory]

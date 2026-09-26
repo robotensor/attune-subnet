@@ -48,6 +48,11 @@ LANE = "horizon"
 #: round's directory and its records' names - and never shown to a reader, who sees "Round N";
 #: the `e` is from when rounds were epochs, and stays so that a round opened then is found again.
 ROUND_ID = "e{number:05d}"
+#: The names a round's close record is published under, in the order they are looked for: the
+#: engine's own now, then the one a round closed before it called them rounds still has. The
+#: record is the same either way - it ranks in `scores.rank` - but for the names of its id and
+#: settings (`round_id` where it said `epoch_id`), and nothing published is ever renamed.
+CLOSE_RECORDS = ("round-{id}", "epoch-{id}")
 #: What a submission holds, when the runtime cannot be asked: the layout of the family shipped
 #: with it. `shape` prefers the runtime's own answer, which is the one it hashes.
 DEFAULT_LAYOUT = {
@@ -331,6 +336,31 @@ class HorizonLane:
         directory = engine.directory(ROUND_ID.format(number=window.number - 1))
         return directory if rounds_.opened(directory) else None
 
+    @staticmethod
+    def _closed(engine: rounds_.Engine, name: str) -> dict[str, Any] | None:
+        """Round `name`'s signed close record, under whichever name it was published; None, and
+        said, when there is none to read or it is another round's."""
+        from horizon_competition import store as store_
+
+        failures = []
+        for spelling in CLOSE_RECORDS:
+            published = spelling.format(id=name)
+            try:
+                entry = store_.read(engine.store, published)
+            except Exception as exc:  # noqa: BLE001 - a missing record is reported, not raised
+                failures.append(str(exc))
+                continue
+            record = entry.get("record") or entry
+            said = record.get("round_id", record.get("epoch_id"))
+            if said is not None and str(said) != name:
+                log.warning("horizon: %s is round %s's record, not %s's", published, said, name)
+                return None
+            return record
+        log.warning(
+            "horizon: round %s closed but its record cannot be read: %s", name, "; ".join(failures)
+        )
+        return None
+
     def _won(self, engine: rounds_.Engine, window: schedule_.Window, name: str) -> None:
         """Read who the closed round ranked first, and note the hotkey that committed them.
 
@@ -339,15 +369,12 @@ class HorizonLane:
         weight vector built from anything else could not be checked at all. A dry run publishes no
         record and pays nobody, which is what makes it a rehearsal.
         """
-        from horizon_competition import store as store_
         from horizon_competition import submissions
 
-        try:
-            record = store_.read(engine.store, f"epoch-{name}")
-        except Exception as exc:  # noqa: BLE001 - a missing record is reported, not raised
-            log.warning("horizon: round %s closed but its record cannot be read: %s", name, exc)
+        record = self._closed(engine, name)
+        if record is None:
             return
-        ranked = ((record.get("record") or record).get("scores") or {}).get("rank") or []
+        ranked = (record.get("scores") or {}).get("rank") or []
         if not ranked:
             log.info("horizon: round %s ranked nobody", name)
             return

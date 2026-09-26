@@ -293,10 +293,11 @@ def test_a_verb_that_fails_is_reported_and_not_noted(lane, tmp_path, monkeypatch
     assert not (lane.state.lane("horizon").get("epochs") or {}).get("e00001")
 
 
-def closed_round(lane, tmp_path, monkeypatch, *, rank, dry_run=False):
-    """Run the last verb of a round whose store holds `rank`, and return the lane's winners."""
-    from horizon_competition import submissions
-
+def closed_round(lane, tmp_path, monkeypatch, *, rank=(), records=None, dry_run=False):
+    """Run the last verb of round e00001, whose store holds `records` (by default its close
+    record, ranking `rank`), and return the lane's winners."""
+    if records is None:
+        records = {"round-e00001": {"round_id": "e00001", "scores": {"rank": list(rank)}}}
     engine_config = tmp_path / "competition.yml"
     engine_config.write_text("axes: {}\n")
     object.__setattr__(lane.cfg, "competition", engine_config)
@@ -313,17 +314,19 @@ def closed_round(lane, tmp_path, monkeypatch, *, rank, dry_run=False):
     monkeypatch.setattr(
         "robotensor.lanes.horizon.subprocess.run", lambda argv, **k: SimpleNamespace(returncode=0)
     )
-    monkeypatch.setattr(
-        "horizon_competition.store.read",
-        lambda store, name: {"scores": {"rank": rank}},
-    )
+
+    def read(store, name):
+        if name not in records:
+            raise LookupError(f"{name}: no such record")
+        return records[name]
+
+    monkeypatch.setattr("horizon_competition.store.read", read)
     lane.step(SimpleNamespace(block=lambda: 1250))
-    return lane.state.lane("horizon").get("winners") or [], submissions
+    return lane.state.lane("horizon").get("winners") or []
 
 
-def test_the_winner_is_read_back_from_the_signed_record(lane, tmp_path, monkeypatch):
-    """Never from what this validator thought was happening: the record is the thing every other
-    reader can check."""
+def entered(lane):
+    """A queued entry of round 1 from hk1; its key, as the engine's register names it."""
     from horizon_competition import submissions
 
     lane.state.lane("horizon")["entries"]["m/one@" + A] = {
@@ -334,36 +337,69 @@ def test_the_winner_is_read_back_from_the_signed_record(lane, tmp_path, monkeypa
         "epoch": 1,
         "status": "queued",
     }
-    key = submissions.key_for("m/one", A)
+    return submissions.key_for("m/one", A)
 
-    winners, _ = closed_round(lane, tmp_path, monkeypatch, rank=[key, "other"])
+
+def test_the_winner_is_read_back_from_the_signed_record(lane, tmp_path, monkeypatch):
+    """Never from what this validator thought was happening: the record is the thing every other
+    reader can check."""
+    key = entered(lane)
+
+    winners = closed_round(lane, tmp_path, monkeypatch, rank=[key, "other"])
 
     assert winners == [{"epoch": 1, "key": key, "hotkey": "hk1"}]
     award = lane.award()
     assert list(award.entries) == ["hk1"] and award.keep == 1 and award.decay == 0.0
 
 
+def test_a_round_closed_before_the_rename_is_read_from_its_epoch_record(
+    lane, tmp_path, monkeypatch
+):
+    """Nothing published is renamed: its record is still `epoch-<id>`, naming `epoch_id`."""
+    key = entered(lane)
+    old = {"epoch-e00001": {"epoch_id": "e00001", "scores": {"rank": [key]}}}
+
+    winners = closed_round(lane, tmp_path, monkeypatch, records=old)
+
+    assert winners == [{"epoch": 1, "key": key, "hotkey": "hk1"}]
+
+
+def test_the_round_record_is_read_before_the_epoch_one(lane, tmp_path, monkeypatch):
+    key = entered(lane)
+    both = {
+        "round-e00001": {"round_id": "e00001", "scores": {"rank": [key]}},
+        "epoch-e00001": {"epoch_id": "e00001", "scores": {"rank": ["somebody__else@1-2"]}},
+    }
+
+    winners = closed_round(lane, tmp_path, monkeypatch, records=both)
+
+    assert [w["key"] for w in winners] == [key]
+
+
+def test_a_record_that_is_another_rounds_pays_nobody(lane, tmp_path, monkeypatch):
+    key = entered(lane)
+    other = {"round-e00001": {"round_id": "e00002", "scores": {"rank": [key]}}}
+
+    assert closed_round(lane, tmp_path, monkeypatch, records=other) == []
+
+
+def test_a_round_with_no_close_record_pays_nobody(lane, tmp_path, monkeypatch):
+    entered(lane)
+
+    assert closed_round(lane, tmp_path, monkeypatch, records={}) == []
+
+
 def test_a_rehearsal_pays_nobody(lane, tmp_path, monkeypatch):
     """A dry run publishes no record; recording a winner from one would pay for a rehearsal."""
-    from horizon_competition import submissions
+    key = entered(lane)
 
-    lane.state.lane("horizon")["entries"]["m/one@" + A] = {
-        "hotkey": "hk1",
-        "repo": "m/one",
-        "revision": A,
-        "commit_block": 1150,
-        "epoch": 1,
-        "status": "queued",
-    }
-    key = submissions.key_for("m/one", A)
-
-    winners, _ = closed_round(lane, tmp_path, monkeypatch, rank=[key], dry_run=True)
+    winners = closed_round(lane, tmp_path, monkeypatch, rank=[key], dry_run=True)
 
     assert winners == [] and list(lane.award().entries) == []
 
 
 def test_a_winner_no_commitment_names_is_not_paid(lane, tmp_path, monkeypatch):
     """The engine's register can hold an entry this chain never accepted; it is not a hotkey."""
-    winners, _ = closed_round(lane, tmp_path, monkeypatch, rank=["somebody__else@1234abcd-0f0f0f"])
+    winners = closed_round(lane, tmp_path, monkeypatch, rank=["somebody__else@1234abcd-0f0f0f"])
 
     assert winners == []

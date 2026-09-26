@@ -65,7 +65,7 @@ def lane(tmp_path):
         genesis_block=1000,
         window_blocks=100,
         store=tmp_path / "store",
-        epochs=tmp_path / "epochs",
+        rounds=tmp_path / "rounds",
         key=tmp_path / "keys" / "k.ed25519",
         private_window_blocks=10,
     )
@@ -206,13 +206,13 @@ def test_a_step_runs_one_verb_and_notes_it(lane, tmp_path, monkeypatch):
     engine_config = tmp_path / "competition.yml"
     engine_config.write_text("axes: {}\n")
     object.__setattr__(lane.cfg, "competition", engine_config)
-    object.__setattr__(lane.cfg, "epochs", tmp_path / "epochs")
+    object.__setattr__(lane.cfg, "rounds", tmp_path / "rounds")
     ran = []
 
     def fake_run(argv, **kwargs):
         ran.append(argv)
-        (tmp_path / "epochs" / "e00001").mkdir(parents=True, exist_ok=True)
-        (tmp_path / "epochs" / "e00001" / "round.json").write_text("{}")
+        (tmp_path / "rounds" / "e00001").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "rounds" / "e00001" / "round.json").write_text("{}")
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr("robotensor.lanes.horizon.subprocess.run", fake_run)
@@ -236,7 +236,7 @@ def opening(lane, tmp_path, monkeypatch):
     engine_config = tmp_path / "competition.yml"
     engine_config.write_text("axes: {}\n")
     object.__setattr__(lane.cfg, "competition", engine_config)
-    object.__setattr__(lane.cfg, "epochs", tmp_path / "epochs")
+    object.__setattr__(lane.cfg, "rounds", tmp_path / "rounds")
     (tmp_path / "store").mkdir(exist_ok=True)
     (tmp_path / "store" / "index.json").write_text("{}")
     ran = []
@@ -256,7 +256,7 @@ def opening(lane, tmp_path, monkeypatch):
 def test_a_round_opens_where_the_one_before_it_closed(lane, tmp_path, monkeypatch, marker):
     """Back to back, like the chain's windows: after the previous round's directory, whichever
     name its marker has - one opened before the rename holds `epoch.json`."""
-    previous = tmp_path / "epochs" / "e00000"
+    previous = tmp_path / "rounds" / "e00000"
     previous.mkdir(parents=True)
     (previous / marker).write_text("{}")
 
@@ -270,7 +270,7 @@ def test_a_round_with_no_round_opened_before_it_follows_nothing(lane, tmp_path, 
     start from: the round opens when it is opened."""
     assert "--after" not in opening(lane, tmp_path, monkeypatch)
 
-    (tmp_path / "epochs" / "e00000").mkdir(parents=True)
+    (tmp_path / "rounds" / "e00000").mkdir(parents=True)
 
     assert "--after" not in opening(lane, tmp_path, monkeypatch)
 
@@ -281,7 +281,7 @@ def test_a_verb_that_fails_is_reported_and_not_noted(lane, tmp_path, monkeypatch
     engine_config = tmp_path / "competition.yml"
     engine_config.write_text("axes: {}\n")
     object.__setattr__(lane.cfg, "competition", engine_config)
-    object.__setattr__(lane.cfg, "epochs", tmp_path / "epochs")
+    object.__setattr__(lane.cfg, "rounds", tmp_path / "rounds")
     monkeypatch.setattr(
         "robotensor.lanes.horizon.subprocess.run", lambda argv, **k: SimpleNamespace(returncode=2)
     )
@@ -301,10 +301,10 @@ def closed_round(lane, tmp_path, monkeypatch, *, rank=(), records=None, dry_run=
     engine_config = tmp_path / "competition.yml"
     engine_config.write_text("axes: {}\n")
     object.__setattr__(lane.cfg, "competition", engine_config)
-    object.__setattr__(lane.cfg, "epochs", tmp_path / "epochs")
+    object.__setattr__(lane.cfg, "rounds", tmp_path / "rounds")
     object.__setattr__(lane.cfg, "store", tmp_path / "store")
     object.__setattr__(lane.cfg, "dry_run", dry_run)
-    directory = tmp_path / "epochs" / "e00001"
+    directory = tmp_path / "rounds" / "e00001"
     directory.mkdir(parents=True)
     for name in ("round.json", "pool_manifest.json", "shortlist.json", "scores.json"):
         (directory / name).write_text("{}")

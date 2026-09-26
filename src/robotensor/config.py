@@ -78,19 +78,20 @@ VECTOR_KEYS = tuple(f.name for f in VectorConfig.__dataclass_fields__.values() i
 
 @dataclass(frozen=True)
 class HorizonConfig(LaneConfig):
-    """Robotensor Horizon: the epoch schedule, and where its signed store and runs live.
+    """Robotensor Horizon: the round schedule, and where its signed store and runs live.
 
     The schedule is in blocks because it is the chain's: `genesis_block` and `window_blocks` are
-    all two validators need to agree on which epoch is open (`protocol.schedule`).
+    all two validators need to agree on which round is open (`protocol.schedule`).
     """
 
-    #: The block the first epoch opened at, and how long each one takes.
+    #: The block the first round opened at, and how long each one takes.
     genesis_block: int = 0
     window_blocks: int = 50400  # a week of 12-second blocks
     store: Path = Path()
-    epochs: Path = Path()
+    #: Where each round's directory is made: `<rounds>/<id>`.
+    rounds: Path = Path()
     key: Path = Path()
-    #: The engine's own configuration, which says what an epoch evaluates.
+    #: The engine's own configuration, which says what a round evaluates.
     competition: Path | None = None
     #: An interpreter for the engine, when it cannot share this one.
     engine_python: str = ""
@@ -110,7 +111,7 @@ class HorizonConfig(LaneConfig):
     models: Path = Path()
     #: The interpreter of the model runtime environment, which serves a submission.
     runtime_python: str = ""
-    #: Which of the engine's profiles an epoch runs (`smoke` is one task an axis); empty for the
+    #: Which of the engine's profiles a round runs (`smoke` is one task an axis); empty for the
     #: config's own default.
     profile: str = ""
     #: Rehearse: score beside the real scores and publish nothing at close.
@@ -120,6 +121,9 @@ class HorizonConfig(LaneConfig):
 HORIZON_KEYS = tuple(
     f.name for f in HorizonConfig.__dataclass_fields__.values() if f.name != "name"
 )
+#: What `[lanes.horizon]` called a key before Horizon's windows were called rounds, and the key it
+#: is read as: a config an operator wrote then still runs as it did.
+HORIZON_RENAMED = {"epochs": "rounds"}
 
 
 @dataclass(frozen=True)
@@ -200,6 +204,23 @@ def _refuse_unknown(where: str, table: dict[str, Any], known: tuple[str, ...], p
         )
 
 
+def _renamed(
+    where: str, table: dict[str, Any], renamed: dict[str, str], path: Path
+) -> dict[str, Any]:
+    """`table` with each key it names by an old name read as the key that name became. Both at
+    once is refused: which of the two was meant cannot be told."""
+    table = dict(table)
+    for old, new in renamed.items():
+        if old not in table:
+            continue
+        if new in table:
+            raise ConfigError(
+                f"{path}: {where} names both {new} and {old}, its old name; keep {new} alone"
+            )
+        table[new] = table.pop(old)
+    return table
+
+
 def _vector(name: str, table: dict[str, Any], base: Path, path: Path) -> VectorConfig:
     _refuse_unknown(f"[lanes.{name}]", table, VECTOR_KEYS, path)
     for required in ("spec", "policy_python", "simulator_python"):
@@ -225,6 +246,7 @@ def _vector(name: str, table: dict[str, Any], base: Path, path: Path) -> VectorC
 
 
 def _horizon(name: str, table: dict[str, Any], base: Path, path: Path) -> HorizonConfig:
+    table = _renamed(f"[lanes.{name}]", table, HORIZON_RENAMED, path)
     _refuse_unknown(f"[lanes.{name}]", table, HORIZON_KEYS, path)
     share = float(table.get("share", 0.0))
     serve_as = str(table.get("serve_as", ""))
@@ -240,7 +262,7 @@ def _horizon(name: str, table: dict[str, Any], base: Path, path: Path) -> Horizo
         genesis_block=int(table.get("genesis_block", 0)),
         window_blocks=int(table.get("window_blocks", 50400)),
         store=_path(base, table.get("store", "var/horizon/store")),
-        epochs=_path(base, table.get("epochs", "var/horizon/epochs")),
+        rounds=_path(base, table.get("rounds", "var/horizon/rounds")),
         key=_path(base, table.get("key", "var/horizon/keys/horizon.ed25519")),
         competition=_path(base, table["competition"]) if table.get("competition") else None,
         engine_python=os.path.expandvars(str(table.get("engine_python", ""))),

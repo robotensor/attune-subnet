@@ -75,3 +75,29 @@ def test_shares_over_the_whole_emission_are_refused(tmp_path):
 def test_a_lane_that_names_no_contract_is_refused(tmp_path):
     with pytest.raises(ConfigError, match="needs spec"):
         load(write(tmp_path, GOOD.replace('spec = "specs/vector_level1.json"', "")))
+
+
+HORIZON = GOOD + "\n[lanes.horizon]\nshare = 0.0\n"
+
+
+def test_horizon_keeps_its_rounds_under_the_root_unless_the_config_says_where(tmp_path):
+    assert load(write(tmp_path, HORIZON)).horizon.rounds == tmp_path / "var" / "horizon" / "rounds"
+
+    cfg = load(write(tmp_path, HORIZON + 'rounds = "runs/rounds"\n'))
+
+    assert cfg.horizon.rounds == tmp_path / "runs" / "rounds"
+
+
+def test_a_config_written_when_rounds_were_epochs_still_runs(tmp_path):
+    """`epochs` is what `[lanes.horizon]` called the rounds' directory: read as `rounds`."""
+    cfg = load(write(tmp_path, HORIZON + 'epochs = "var/horizon/epochs"\n'))
+
+    assert cfg.horizon.rounds == tmp_path / "var" / "horizon" / "epochs"
+
+
+def test_a_key_under_both_its_names_is_refused(tmp_path):
+    """Which of the two was meant cannot be told."""
+    both = HORIZON + 'epochs = "var/horizon/epochs"\nrounds = "var/horizon/rounds"\n'
+
+    with pytest.raises(ConfigError, match="both rounds and epochs"):
+        load(write(tmp_path, both))

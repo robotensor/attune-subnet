@@ -281,7 +281,7 @@ class HorizonLane:
             config=self.cfg.competition,
             store=self.cfg.store,
             keys=self.cfg.key.parent,
-            rounds=self.cfg.epochs,
+            rounds=self.cfg.rounds,
             models=self.cfg.models,
             runtime_python=self.cfg.runtime_python,
             serve_as=self.cfg.serve_as,

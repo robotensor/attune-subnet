@@ -15,8 +15,8 @@ Rules, all keyed by hotkey and mapped to UIDs only at the end, because UIDs are 
 - Everything not given to a champion goes to the burn UID. Weights sum to 1.
 
 Two cadences, one formula. `decay = 1.0, entries = 5` is Vector's pool: five champions, equal
-parts. `decay = 0.0, entries = 1` is Horizon's epoch: the winner takes all, and if that winner
-deregisters the lane's whole share burns until the next epoch closes - a real cliff, and the
+parts. `decay = 0.0, entries = 1` is Horizon's round: the winner takes all, and if that winner
+deregisters the lane's whole share burns until the next round closes - a real cliff, and the
 reason these are knobs rather than constants.
 """
 

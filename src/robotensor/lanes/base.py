@@ -1,13 +1,13 @@
 """What the validator knows about a competition, whatever its cadence.
 
-Vector duels a challenger against the reigning king; Horizon opens an epoch, freezes a pool of
+Vector duels a challenger against the reigning king; Horizon opens a round, freezes a pool of
 demonstrations, scores every entrant on it and closes. The validator drives both the same way -
 take in what the chain says, do one piece of work, say who should be paid - and knows nothing of
-duels or epochs. Everything that does is behind this shape.
+duels or rounds. Everything that does is behind this shape.
 
 Two rules make that possible:
 
-- **One `step()` is one resumable piece of work**: a whole duel for Vector, one epoch verb for
+- **One `step()` is one resumable piece of work**: a whole duel for Vector, one round verb for
   Horizon. Killed halfway, the next `step()` picks the same work up where the engine left it, so
   the loop never has to remember what it was doing.
 - **A lane never raises its engine's exceptions.** The loop cannot catch what it cannot import,
@@ -27,7 +27,7 @@ from typing import Any, Protocol, runtime_checkable
 
 from ..protocol.weights import CHAMPIONS
 
-#: A step did work that moved the competition on: a duel published, an epoch verb finished.
+#: A step did work that moved the competition on: a duel published, a round verb finished.
 WORKED = "worked"
 #: There was nothing to do. Everything the chain has offered is settled.
 IDLE = "idle"

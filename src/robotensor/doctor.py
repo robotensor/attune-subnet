@@ -122,7 +122,7 @@ def _gpus() -> tuple[bool, str]:
 
     devices = visible_devices()
     if not devices:
-        return False, "no GPU: a duel and an epoch both need one"
+        return False, "no GPU: a duel and a round both need one"
     return True, f"{len(devices)} visible: {', '.join(str(d) for d in devices)}"
 
 
@@ -188,7 +188,7 @@ def _serve_as(lane_cfg: Any) -> tuple[bool, str]:
 def _horizon_engine(lane_cfg: Any) -> tuple[bool, str]:
     """What the engine says about this host, in the engine's own words.
 
-    `config check` already answers "can this machine run an epoch?" better than anything here
+    `config check` already answers "can this machine run a round?" better than anything here
     could: it resolves every path the config names and asks each benchmark fork about its task
     config and its tasks. Repeating that badly would be worse than quoting it.
     """
@@ -283,7 +283,7 @@ def validator_checks(cfg: Any, competition: str) -> list[Check]:
                 "schedule",
                 lambda: (
                     True,
-                    f"epochs of {lane_cfg.window_blocks} blocks from block "
+                    f"rounds of {lane_cfg.window_blocks} blocks from block "
                     f"{lane_cfg.genesis_block}",
                 ),
             ),

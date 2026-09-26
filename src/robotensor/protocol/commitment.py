@@ -20,7 +20,7 @@ MAX_BYTES = 128
 #: Competition 1, action-grounded in-context learning: the only one live at launch.
 VECTOR = "vector"
 #: Competition 2, video-prompted world-action learning. Its commitments are read and taken in;
-#: what they enter does not pay yet (`[lanes.horizon].share`), and the epoch that scores them is
+#: what they enter does not pay yet (`[lanes.horizon].share`), and the round that scores them is
 #: staged in `lanes/horizon.py`.
 HORIZON = "horizon"
 LANES = (VECTOR, HORIZON)

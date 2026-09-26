@@ -1,9 +1,9 @@
-"""Driving one Horizon epoch, one verb at a time.
+"""Driving one Horizon round, one verb at a time.
 
 The engine does the work - open, pool, screen, shortlist, evaluate, score, close - and each of
 those verbs takes minutes to hours. The validator's loop must be able to die between any two of
-them and pick the epoch up where it was left, so nothing here keeps a plan in memory: what has
-been done is read from the epoch's own directory, and the two verbs that leave no single file
+them and pick the round up where it was left, so nothing here keeps a plan in memory: what has
+been done is read from the round's own directory, and the two verbs that leave no single file
 behind are read from the lane's note of the last one that finished.
 
 Re-running a verb is safe. The engine's drains skip what is already there, and its `open`, `pool`
@@ -25,8 +25,8 @@ SHORTLIST_JSON = "shortlist.json"
 SCORES_JSON = "scores.json"
 DRY_RUN_SCORES_JSON = "scores-dry-run.json"
 
-#: The order an epoch is run in. `screen` and `full` are the engine's two drains: the screening
-#: round every entrant runs, and the full round the shortlist runs.
+#: The order a round is run in. `screen` and `full` are the engine's two drains: the screening
+#: stage every entrant runs, and the full stage the shortlist runs.
 STEPS = ("open", "pool", "screen", "shortlist", "full", "score", "close")
 #: What each verb leaves behind, where it leaves one file.
 MARKERS = {
@@ -38,7 +38,7 @@ MARKERS = {
 
 @dataclass(frozen=True)
 class Plan:
-    """Where one epoch has got to, and what to run next.
+    """Where one round has got to, and what to run next.
 
     `stage` is the last verb the lane noted as finished; it decides only the two drains, which
     leave no file of their own.
@@ -47,7 +47,7 @@ class Plan:
     directory: Path
     stage: str = ""
     #: A close that publishes nothing and a score that writes beside the real one: what a smoke
-    #: epoch does, so a rehearsal can be run against a store nobody has to throw away.
+    #: round does, so a rehearsal can be run against a store nobody has to throw away.
     dry_run: bool = False
     steps: Sequence[str] = STEPS
 
@@ -66,14 +66,14 @@ class Plan:
         return self.steps.index(name) <= self.steps.index(self.stage)
 
     def next(self) -> str | None:
-        """The verb to run now, or None when the epoch is finished."""
+        """The verb to run now, or None when the round is finished."""
         for name in self.steps:
             if not self.finished(name):
                 return name
         return None
 
     def at(self) -> str:
-        """Where the epoch is, in one phrase."""
+        """Where the round is, in one phrase."""
         following = self.next()
         return "finished" if following is None else f"next: {following}"
 
@@ -86,14 +86,15 @@ class Engine:
     config: Path
     store: Path
     keys: Path
-    epochs: Path
+    #: Where each round's directory is made: `<rounds>/<id>`.
+    rounds: Path
     models: Path
     runtime_python: str = ""
     serve_as: str = ""
     devices: tuple[int, ...] = ()
 
-    def directory(self, epoch: str) -> Path:
-        return self.epochs / epoch
+    def directory(self, round_id: str) -> Path:
+        return self.rounds / round_id
 
     def store_argv(self) -> list[str]:
         """`store init`: the signed store and the key that signs it, made once."""
@@ -113,9 +114,11 @@ class Engine:
     def store_ready(self) -> bool:
         return (self.store / "index.json").is_file()
 
-    def argv(self, verb: str, epoch: str, *, profile: str = "", dry_run: bool = False) -> list[str]:
+    def argv(
+        self, verb: str, round_id: str, *, profile: str = "", dry_run: bool = False
+    ) -> list[str]:
         """The command for one verb, as the engine's own CLI takes it."""
-        directory = str(self.directory(epoch))
+        directory = str(self.directory(round_id))
         head = [self.python, "-m", "horizon_competition.cli", "epoch"]
         if verb == "open":
             argv = [

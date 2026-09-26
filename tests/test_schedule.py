@@ -1,4 +1,4 @@
-"""Epochs are the chain's: two validators at the same head must agree without talking."""
+"""Rounds are the chain's: two validators at the same head must agree without talking."""
 
 import hashlib
 
@@ -14,7 +14,7 @@ from robotensor.protocol.schedule import (
 WEEK = 7 * 24 * 60 * 60 // 12  # a week of 12-second blocks
 
 
-def test_windows_are_back_to_back_so_every_commitment_lands_in_one_epoch():
+def test_windows_are_back_to_back_so_every_commitment_lands_in_one_round():
     schedule = Schedule(genesis_block=1000, window_blocks=100)
 
     first, second = schedule.window(0), schedule.window(1)
@@ -25,7 +25,7 @@ def test_windows_are_back_to_back_so_every_commitment_lands_in_one_epoch():
     assert not first.holds(1100) and second.holds(1100)
 
 
-def test_two_validators_at_the_same_head_compute_the_same_epoch():
+def test_two_validators_at_the_same_head_compute_the_same_round():
     """No coordination, no clock, nobody to ask: the head is the whole input."""
     one, other = Schedule(1000, WEEK), Schedule(1000, WEEK)
     head = 1000 + 3 * WEEK + 17
@@ -34,7 +34,7 @@ def test_two_validators_at_the_same_head_compute_the_same_epoch():
     assert one.at(head).number == 3
 
 
-def test_before_the_first_epoch_there_is_none():
+def test_before_the_first_round_there_is_none():
     with pytest.raises(NotYet, match="opens at block 1000"):
         Schedule(1000, 100).at(999)
 

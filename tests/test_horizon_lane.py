@@ -1,4 +1,4 @@
-"""Horizon's chain side: which epoch a commitment entered, and what the lane says it does."""
+"""Horizon's chain side: which round a commitment entered, and what the lane says it does."""
 
 import hashlib
 from types import SimpleNamespace
@@ -80,7 +80,7 @@ def test_the_lane_is_what_the_validator_asks_of_a_competition(lane):
     assert isinstance(lane, Lane) and lane.name == "horizon"
 
 
-def test_a_commitment_enters_the_epoch_that_was_open_when_it_was_made(lane, monkeypatch):
+def test_a_commitment_enters_the_round_that_was_open_when_it_was_made(lane, monkeypatch):
     """Not the one open when a validator got round to reading it."""
     monkeypatch.setattr(
         "robotensor.hub.inspect",
@@ -89,12 +89,12 @@ def test_a_commitment_enters_the_epoch_that_was_open_when_it_was_made(lane, monk
 
     [entry] = lane.intake([c("hk1", "m/one", A, 1150)], block=9000)
 
-    assert entry.epoch == 1 and entry.status == "queued"
+    assert entry.round == 1 and entry.status == "queued"
     assert [e.key for e in lane.entrants(1)] == ["m/one@" + A]
     assert lane.entrants(0) == []
 
 
-def test_a_commitment_from_before_the_first_epoch_entered_nothing(lane):
+def test_a_commitment_from_before_the_first_round_entered_nothing(lane):
     assert lane.intake([c("hk1", "m/one", A, 999)], block=9000) == []
 
 
@@ -130,21 +130,21 @@ def test_a_shard_that_is_not_in_lfs_is_refused_rather_than_downloaded(lane):
     assert entry.status == "refused"
 
 
-def test_a_step_says_where_the_open_epoch_stands(lane):
+def test_a_step_says_where_the_open_round_stands(lane):
     progress = lane.step(SimpleNamespace(block=lambda: 1150))
 
     assert progress.outcome == IDLE
-    assert "epoch 1 is open until block 1200" in progress.detail
+    assert "round 1 is open until block 1200" in progress.detail
 
 
-def test_with_no_engine_configured_nothing_scores_the_closed_epoch(lane):
+def test_with_no_engine_configured_nothing_scores_the_closed_round(lane):
     """A validator that runs only the other competition says so, rather than failing."""
     progress = lane.step(SimpleNamespace(block=lambda: 1150))
 
     assert "no engine configured to score them" in progress.detail
 
 
-def test_an_epoch_waits_until_its_seed_block_is_final(lane):
+def test_a_round_waits_until_its_seed_block_is_final(lane):
     """The units are drawn from a block after the window closed; reading it early would read a
     block that can still be reorganised."""
     progress = lane.step(SimpleNamespace(block=lambda: 1101))
@@ -152,13 +152,13 @@ def test_an_epoch_waits_until_its_seed_block_is_final(lane):
     assert progress.outcome == WAITING and "seed is not final" in progress.detail
 
 
-def test_the_first_epoch_has_nothing_before_it(lane):
+def test_the_first_round_has_nothing_before_it(lane):
     progress = lane.step(SimpleNamespace(block=lambda: 1050))
 
     assert progress.outcome == IDLE and "none has closed yet" in progress.detail
 
 
-def test_with_no_closed_epoch_there_is_nobody_to_pay(lane):
+def test_with_no_closed_round_there_is_nobody_to_pay(lane):
     award = lane.award()
 
     assert list(award.entries) == [] and award.keep == 1 and award.decay == 0.0
@@ -220,15 +220,15 @@ def test_a_step_runs_one_verb_and_notes_it(lane, tmp_path, monkeypatch):
 
     progress = lane.step(SimpleNamespace(block=lambda: 1250))
 
-    assert progress.outcome == WORKED and progress.detail == "epoch e00001: open"
-    # The store and the key that signs it are made once, before the first epoch is opened.
+    assert progress.outcome == WORKED and progress.detail == "round e00001: open"
+    # The store and the key that signs it are made once, before the first round is opened.
     assert [argv[3:5] for argv in ran] == [["store", "init"], ["epoch", "open"]]
     assert lane.state.lane("horizon")["epochs"]["e00001"]["stage"] == "open"
 
-    # The next step picks the epoch up where the engine left it.
+    # The next step picks the round up where the engine left it.
     ran.clear()
     monkeypatch.setattr("robotensor.lanes.horizon.subprocess.run", fake_run)
-    assert lane.step(SimpleNamespace(block=lambda: 1250)).detail == "epoch e00001: pool"
+    assert lane.step(SimpleNamespace(block=lambda: 1250)).detail == "round e00001: pool"
 
 
 def test_a_verb_that_fails_is_reported_and_not_noted(lane, tmp_path, monkeypatch):
@@ -249,8 +249,8 @@ def test_a_verb_that_fails_is_reported_and_not_noted(lane, tmp_path, monkeypatch
     assert not (lane.state.lane("horizon").get("epochs") or {}).get("e00001")
 
 
-def closed_epoch(lane, tmp_path, monkeypatch, *, rank, dry_run=False):
-    """Run the last verb of an epoch whose store holds `rank`, and return the lane's winners."""
+def closed_round(lane, tmp_path, monkeypatch, *, rank, dry_run=False):
+    """Run the last verb of a round whose store holds `rank`, and return the lane's winners."""
     from horizon_competition import submissions
 
     engine_config = tmp_path / "competition.yml"
@@ -292,7 +292,7 @@ def test_the_winner_is_read_back_from_the_signed_record(lane, tmp_path, monkeypa
     }
     key = submissions.key_for("m/one", A)
 
-    winners, _ = closed_epoch(lane, tmp_path, monkeypatch, rank=[key, "other"])
+    winners, _ = closed_round(lane, tmp_path, monkeypatch, rank=[key, "other"])
 
     assert winners == [{"epoch": 1, "key": key, "hotkey": "hk1"}]
     award = lane.award()
@@ -313,13 +313,13 @@ def test_a_rehearsal_pays_nobody(lane, tmp_path, monkeypatch):
     }
     key = submissions.key_for("m/one", A)
 
-    winners, _ = closed_epoch(lane, tmp_path, monkeypatch, rank=[key], dry_run=True)
+    winners, _ = closed_round(lane, tmp_path, monkeypatch, rank=[key], dry_run=True)
 
     assert winners == [] and list(lane.award().entries) == []
 
 
 def test_a_winner_no_commitment_names_is_not_paid(lane, tmp_path, monkeypatch):
     """The engine's register can hold an entry this chain never accepted; it is not a hotkey."""
-    winners, _ = closed_epoch(lane, tmp_path, monkeypatch, rank=["somebody__else@1234abcd-0f0f0f"])
+    winners, _ = closed_round(lane, tmp_path, monkeypatch, rank=["somebody__else@1234abcd-0f0f0f"])
 
     assert winners == []

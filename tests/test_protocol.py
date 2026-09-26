@@ -90,7 +90,7 @@ def test_shares_over_one_are_refused():
 
 
 def test_winner_takes_all_pays_the_newest_entry_and_nothing_older():
-    """Horizon's cadence: one epoch, one winner. The runners-up of a closed epoch are champions
+    """Horizon's cadence: one round, one winner. The runners-up of a closed round are champions
     of earlier ones and are not paid again."""
     lane = Lane("horizon", 0.70, ["new", "older", "oldest"], entries=1, decay=0.0)
 
@@ -101,7 +101,7 @@ def test_winner_takes_all_pays_the_newest_entry_and_nothing_older():
 
 def test_a_winner_who_deregistered_burns_the_whole_lane_share():
     """The cliff winner-takes-all has: with one entry there is nobody to fall back to, and the
-    share burns until the next epoch closes."""
+    share burns until the next round closes."""
     lane = Lane("horizon", 0.70, ["gone", "older"], entries=1, decay=0.0)
 
     w = weight_vector([lane], {"older": 2, "o": 0}, burn_uid=0)

@@ -1,8 +1,8 @@
-"""Where an epoch has got to, and what the validator runs next."""
+"""Where a round has got to, and what the validator runs next."""
 
 import pytest
 
-from robotensor.lanes.epochs import STEPS, Engine, Plan
+from robotensor.lanes.rounds import STEPS, Engine, Plan
 
 
 def leave(directory, name):
@@ -46,7 +46,7 @@ def test_a_note_one_step_stale_costs_a_re_run_and_never_a_wrong_result(tmp_path)
     for name in ("epoch.json", "pool_manifest.json", "shortlist.json"):
         leave(directory, name)
 
-    # The note says the screen finished; the full round's own note was lost.
+    # The note says the screen finished; the full stage's own note was lost.
     assert Plan(directory, stage="screen").next() == "full"
 
 
@@ -57,10 +57,10 @@ def test_a_dry_run_scores_beside_the_real_thing(tmp_path):
     leave(directory, "scores-dry-run.json")
 
     assert Plan(directory, stage="full", dry_run=True).next() == "close"
-    assert Plan(directory, stage="full").next() == "score", "a real epoch wants the real scores"
+    assert Plan(directory, stage="full").next() == "score", "a real round wants the real scores"
 
 
-def test_an_epoch_that_has_run_every_verb_is_finished(tmp_path):
+def test_a_round_that_has_run_every_verb_is_finished(tmp_path):
     directory = tmp_path / "e"
     for name in ("epoch.json", "pool_manifest.json", "shortlist.json", "scores.json"):
         leave(directory, name)
@@ -76,7 +76,7 @@ def engine(tmp_path):
         config=tmp_path / "competition.yml",
         store=tmp_path / "store",
         keys=tmp_path / "keys",
-        epochs=tmp_path / "epochs",
+        rounds=tmp_path / "rounds",
         models=tmp_path / "models",
         runtime_python="/opt/runtime/bin/python",
         serve_as="horizon",
@@ -92,7 +92,7 @@ def test_open_names_the_store_the_keys_and_the_register(engine):
     assert str(engine.store) in argv and str(engine.keys) in argv
 
 
-def test_the_screening_round_is_the_drain_told_to_screen_only(engine):
+def test_the_screening_stage_is_the_drain_told_to_screen_only(engine):
     screen = engine.argv("screen", "2026-W39")
     full = engine.argv("full", "2026-W39")
 

@@ -9,7 +9,7 @@
     status   where each competition stands
 
 The chain is `chain.Chain`, the only bittensor code. What a competition is lives behind
-`lanes.base.Lane`; nothing here knows what a duel or an epoch is.
+`lanes.base.Lane`; nothing here knows what a duel or a round is.
 """
 
 from __future__ import annotations

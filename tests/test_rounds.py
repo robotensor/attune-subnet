@@ -119,6 +119,24 @@ def test_every_verb_is_the_engines_round_command_on_the_rounds_directory(engine,
     assert "epoch" not in argv and "--epoch" not in argv
 
 
+@pytest.mark.parametrize("stage", ["screen", "full"])
+def test_each_drain_publishes_a_models_result_as_soon_as_it_finishes(engine, stage):
+    """Live, and signed into the round's own store with the round's own key."""
+    argv = engine.argv(stage, "e00007")
+
+    assert argv[3:5] == ["round", "drain"]
+    assert argv[argv.index("--store") + 1] == str(engine.store)
+    assert argv[argv.index("--keys") + 1] == str(engine.keys)
+
+
+@pytest.mark.parametrize("stage", ["screen", "full"])
+def test_a_rehearsals_drains_publish_nothing(engine, stage):
+    """A result is published once: a rehearsal's would take the real round's name."""
+    argv = engine.argv(stage, "e00007", dry_run=True)
+
+    assert "--store" not in argv and "--keys" not in argv
+
+
 def test_a_served_model_runs_as_the_user_the_config_names(engine):
     """Not as the validator: a model served as that user could read the episode's answer key."""
     argv = engine.argv("full", "2026-W39")

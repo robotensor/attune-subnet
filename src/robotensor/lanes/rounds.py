@@ -49,8 +49,9 @@ class Plan:
 
     directory: Path
     stage: str = ""
-    #: A close that publishes nothing and a score that writes beside the real one: what a smoke
-    #: round does, so a rehearsal can be run against a store nobody has to throw away.
+    #: Drains that publish no live result, a close that publishes nothing and a score that writes
+    #: beside the real one: what a smoke round does, so a rehearsal can be run against a store
+    #: nobody has to throw away.
     dry_run: bool = False
     steps: Sequence[str] = STEPS
 
@@ -162,6 +163,12 @@ class Engine:
                 argv += ["--serve-as", self.serve_as]
             if self.devices:
                 argv += ["--gpus", ",".join(str(d) for d in self.devices)]
+            if not dry_run:
+                # Each model's result is signed into the store the moment it finishes a stage,
+                # rather than a week later at close: provisional, and the close record stays the
+                # authority. A rehearsal publishes none, because a result is published once and
+                # would take the name the real round's result needs.
+                argv += ["--store", str(self.store), "--keys", str(self.keys)]
             return [*argv, "--screen-only"] if verb == "screen" else argv
         if verb == "shortlist":
             return [*head, "shortlist", "--round", directory]

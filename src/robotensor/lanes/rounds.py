@@ -20,8 +20,8 @@ from pathlib import Path
 
 #: The engine's files that say a verb finished.
 ROUND_JSON = "round.json"
-#: What `open` left before the engine called its rounds epochs no more. A round directory is read
-#: by what is in it: one holding this was opened, and is carried on, not opened again.
+#: What `open` left while the engine still called its rounds epochs. A round directory is read by
+#: what is in it: one holding this was opened, and is carried on, not opened again.
 EPOCH_JSON = "epoch.json"
 POOL_MANIFEST_JSON = "pool_manifest.json"
 SHORTLIST_JSON = "shortlist.json"

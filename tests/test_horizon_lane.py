@@ -223,7 +223,7 @@ def test_a_step_runs_one_verb_and_notes_it(lane, tmp_path, monkeypatch):
     assert progress.outcome == WORKED and progress.detail == "round e00001: open"
     # The store and the key that signs it are made once, before the first round is opened.
     assert [argv[3:5] for argv in ran] == [["store", "init"], ["round", "open"]]
-    assert lane.state.lane("horizon")["epochs"]["e00001"]["stage"] == "open"
+    assert lane.state.lane("horizon")["rounds"]["e00001"]["stage"] == "open"
 
     # The next step picks the round up where the engine left it.
     ran.clear()
@@ -290,7 +290,7 @@ def test_a_verb_that_fails_is_reported_and_not_noted(lane, tmp_path, monkeypatch
     progress = lane.step(SimpleNamespace(block=lambda: 1250))
 
     assert progress.outcome == FAILED and "exited 2" in progress.detail
-    assert not (lane.state.lane("horizon").get("epochs") or {}).get("e00001")
+    assert not (lane.state.lane("horizon").get("rounds") or {}).get("e00001")
 
 
 def closed_round(lane, tmp_path, monkeypatch, *, rank=(), records=None, dry_run=False):
@@ -309,7 +309,7 @@ def closed_round(lane, tmp_path, monkeypatch, *, rank=(), records=None, dry_run=
     for name in ("round.json", "pool_manifest.json", "shortlist.json", "scores.json"):
         (directory / name).write_text("{}")
     # The drains leave no file of their own, so the lane noted them as they finished.
-    lane.state.lane("horizon").setdefault("epochs", {})["e00001"] = {"stage": "full"}
+    lane.state.lane("horizon").setdefault("rounds", {})["e00001"] = {"stage": "full"}
     lane.state.save()  # as intake leaves it: on disk, because `writing` re-reads under the lock
     monkeypatch.setattr(
         "robotensor.lanes.horizon.subprocess.run", lambda argv, **k: SimpleNamespace(returncode=0)
@@ -334,7 +334,7 @@ def entered(lane):
         "repo": "m/one",
         "revision": A,
         "commit_block": 1150,
-        "epoch": 1,
+        "round": 1,
         "status": "queued",
     }
     return submissions.key_for("m/one", A)
@@ -347,7 +347,7 @@ def test_the_winner_is_read_back_from_the_signed_record(lane, tmp_path, monkeypa
 
     winners = closed_round(lane, tmp_path, monkeypatch, rank=[key, "other"])
 
-    assert winners == [{"epoch": 1, "key": key, "hotkey": "hk1"}]
+    assert winners == [{"round": 1, "key": key, "hotkey": "hk1"}]
     award = lane.award()
     assert list(award.entries) == ["hk1"] and award.keep == 1 and award.decay == 0.0
 
@@ -361,7 +361,7 @@ def test_a_round_closed_before_the_rename_is_read_from_its_epoch_record(
 
     winners = closed_round(lane, tmp_path, monkeypatch, records=old)
 
-    assert winners == [{"epoch": 1, "key": key, "hotkey": "hk1"}]
+    assert winners == [{"round": 1, "key": key, "hotkey": "hk1"}]
 
 
 def test_the_round_record_is_read_before_the_epoch_one(lane, tmp_path, monkeypatch):
@@ -403,3 +403,49 @@ def test_a_winner_no_commitment_names_is_not_paid(lane, tmp_path, monkeypatch):
     winners = closed_round(lane, tmp_path, monkeypatch, rank=["somebody__else@1234abcd-0f0f0f"])
 
     assert winners == []
+
+
+def test_what_the_lane_noted_before_the_rename_is_still_read(lane, tmp_path, monkeypatch):
+    """Its document said `epoch` where it now says `round`: an entry's round, the notes of a
+    round's verbs and a winner's round are read under either name, and nothing is rewritten."""
+    doc = lane.state.lane("horizon")
+    doc["entries"]["m/one@" + A] = {
+        "hotkey": "hk1",
+        "repo": "m/one",
+        "revision": A,
+        "commit_block": 1150,
+        "epoch": 1,
+        "status": "queued",
+    }
+    doc["epochs"] = {"e00001": {"stage": "screen"}}
+    doc["winners"] = [{"epoch": 0, "key": "k0", "hotkey": "hk0"}]
+    lane.state.save()
+
+    assert [(e.key, e.round) for e in lane.entrants(1)] == [("m/one@" + A, 1)]
+
+    engine_config = tmp_path / "competition.yml"
+    engine_config.write_text("axes: {}\n")
+    object.__setattr__(lane.cfg, "competition", engine_config)
+    object.__setattr__(lane.cfg, "rounds", tmp_path / "rounds")
+    directory = tmp_path / "rounds" / "e00001"
+    directory.mkdir(parents=True)
+    for name in ("epoch.json", "pool_manifest.json"):
+        (directory / name).write_text("{}")
+    monkeypatch.setattr(
+        "robotensor.lanes.horizon.subprocess.run", lambda argv, **k: SimpleNamespace(returncode=0)
+    )
+
+    assert lane.step(SimpleNamespace(block=lambda: 1250)).detail == "round e00001: shortlist"
+    assert lane.state.lane("horizon")["rounds"]["e00001"] == {"stage": "shortlist"}
+    assert list(lane.award().entries) == ["hk0"]
+
+
+def test_a_round_whose_winner_was_noted_before_the_rename_is_not_paid_twice(
+    lane, tmp_path, monkeypatch
+):
+    key = entered(lane)
+    lane.state.lane("horizon")["winners"] = [{"epoch": 1, "key": key, "hotkey": "hk1"}]
+
+    winners = closed_round(lane, tmp_path, monkeypatch, rank=[key])
+
+    assert winners == [{"epoch": 1, "key": key, "hotkey": "hk1"}]

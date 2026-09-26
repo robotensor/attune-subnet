@@ -65,6 +65,25 @@ DEFAULT_LAYOUT = {
 }
 
 
+def round_of(record: dict[str, Any]) -> int | None:
+    """The round an entry or a winner in the lane's document belongs to; None for neither.
+
+    The document said `epoch` before Horizon's windows were called rounds, and what it holds from
+    then is read as it is, never rewritten: `round`, else `epoch`.
+    """
+    number = record.get("round", record.get("epoch"))
+    return None if number is None else int(number)
+
+
+def noted_of(lane: dict[str, Any], name: str) -> dict[str, Any]:
+    """What the lane noted of round `name`: under `rounds`, else the `epochs` it was noted under
+    before the rename."""
+    for notes in (lane.get("rounds"), lane.get("epochs")):
+        if isinstance(notes, dict) and isinstance(notes.get(name), dict):
+            return notes[name]
+    return {}
+
+
 @dataclass(frozen=True)
 class Entry:
     key: str
@@ -184,7 +203,7 @@ class HorizonLane:
                 "repo": sub.repo,
                 "revision": sub.revision,
                 "commit_block": c.block,
-                "epoch": number,
+                "round": number,
                 "status": PENDING,
                 "reason": "",
             }
@@ -220,7 +239,7 @@ class HorizonLane:
                     if (
                         other_key != key
                         and other["hotkey"] == c.hotkey
-                        and other.get("epoch") == number
+                        and round_of(other) == number
                         and other["status"] in (PENDING, QUEUED)
                     ):
                         other.update(status="superseded", reason=f"replaced by {key}")
@@ -237,7 +256,7 @@ class HorizonLane:
         waiting = [
             self._entry(key, record)
             for key, record in lane["entries"].items()
-            if record["status"] == QUEUED and int(record.get("epoch", -1)) == number
+            if record["status"] == QUEUED and round_of(record) == number
         ]
         return sorted(waiting, key=lambda e: (e.commit_block, e.hotkey))
 
@@ -294,7 +313,7 @@ class HorizonLane:
         """Run the next verb of `window`'s round, and note it when it finishes."""
         name = ROUND_ID.format(number=window.number)
         lane = self.state.lane(LANE)
-        noted = (lane.get("epochs") or {}).get(name) or {}
+        noted = noted_of(lane, name)
         plan = rounds_.Plan(
             engine.directory(name), stage=str(noted.get("stage", "")), dry_run=self.cfg.dry_run
         )
@@ -318,7 +337,7 @@ class HorizonLane:
         if done.returncode != 0:
             return Progress(LANE, FAILED, f"round {name}: {verb} exited {done.returncode}")
         with self.state.writing(LANE) as doc:
-            doc.setdefault("epochs", {}).setdefault(name, {})["stage"] = verb
+            doc.setdefault("rounds", {}).setdefault(name, {})["stage"] = verb
         if verb == "close" and not self.cfg.dry_run:
             self._won(engine, window, name)
         return Progress(LANE, WORKED, f"round {name}: {verb}")
@@ -393,8 +412,8 @@ class HorizonLane:
             return
         with self.state.writing(LANE) as doc:
             winners = doc.setdefault("winners", [])
-            if not any(w.get("epoch") == window.number for w in winners):
-                winners.append({"epoch": window.number, "key": first, "hotkey": hotkey})
+            if not any(round_of(w) == window.number for w in winners):
+                winners.append({"round": window.number, "key": first, "hotkey": hotkey})
         log.info("horizon: round %s was won by %s (%s)", name, first, hotkey)
 
     def _register(self, engine: rounds_.Engine, window: schedule_.Window) -> None:
@@ -431,7 +450,7 @@ class HorizonLane:
 
     def snapshot(self) -> dict[str, Any]:
         lane = self.state.lane(LANE)
-        window = self.schedule.window(int(lane.get("epoch", 0)))
+        window = self.schedule.window(int(lane.get("round", 0)))
         return {
             "schedule": {
                 "genesis_block": self.cfg.genesis_block,
@@ -457,5 +476,5 @@ class HorizonLane:
             revision=str(record["revision"]),
             commit_block=int(record["commit_block"]),
             status=str(record["status"]),
-            round=int(record.get("epoch", 0)),
+            round=round_of(record) or 0,
         )

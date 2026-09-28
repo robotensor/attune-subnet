@@ -28,7 +28,7 @@ store = "var/testnet/vector/store"
 key = "var/testnet/vector-keys/orchestrator.ed25519"
 run_dir = "var/testnet/vector/runs"
 cache = "/root/robotensor/.cache/weights"
-policy_python = "/root/robotensor/.venvs/vector-protocol/bin/python"
+policy_python = "/root/robotensor/.venvs/vector-policy/bin/python"
 simulator_python = "/root/robotensor/.venvs/robotwin-bench/bin/python"
 simulator_root = "/root/robotensor/vector/RoboTwin-Vector"
 # The launch size: 160 units a side, 10 per task (the spec's default).

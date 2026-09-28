@@ -57,6 +57,7 @@ def lane(tmp_path):
         cache=tmp_path / "cache",
         policy_python="python",
         simulator_python="python",
+        simulator_root="/checkout/RoboTwin-Vector",
         private_window_blocks=10,
     )
     return VectorLane(cfg, State(tmp_path / "state"))

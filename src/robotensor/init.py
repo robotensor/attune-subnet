@@ -46,9 +46,11 @@ store = "var/vector/store"
 key = "var/vector/keys/orchestrator.ed25519"
 run_dir = "var/vector/runs"
 cache = "var/vector/cache"
-# The two environments a duel needs; see docs/VALIDATOR.md. `robotensor doctor` checks both.
+# The two environments a duel needs, and the RoboTwin-Vector checkout the simulator runs from; see
+# docs/VALIDATOR.md. `robotensor doctor` checks all three.
 policy_python = "{policy_python}"
 simulator_python = "{simulator_python}"
+simulator_root = "{simulator_root}"
 duel_size = "launch"
 workers = 4
 # A Hugging Face dataset the signed store is published to; empty to keep it local.
@@ -80,6 +82,7 @@ def validator(directory: Path, **values: str) -> Path:
         "wallet_hotkey": "default",
         "policy_python": "/path/to/policy-env/bin/python",
         "simulator_python": "/path/to/simulator-env/bin/python",
+        "simulator_root": "/path/to/RoboTwin-Vector",
         **values,
     }
     directory.mkdir(parents=True, exist_ok=True)

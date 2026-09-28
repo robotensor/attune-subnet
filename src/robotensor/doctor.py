@@ -235,15 +235,22 @@ def _vector_contract(lane_cfg: Any) -> tuple[bool, str]:
 
 
 def _vector_benchmark(lane_cfg: Any) -> tuple[bool, str]:
-    from vector_orchestrator.benchmarks.plugins import discover
+    """The RoboTwin-Vector checkout, asked what a duel needs: its task table, each suite's config
+    (with the assets it loads) and the harness it runs, under the simulator's interpreter."""
+    from vector_orchestrator.benchmarks.drivers import discover
     from vector_orchestrator.spec import load_spec_file
 
+    os.environ["ROBOTWIN_BENCH_ROOT"] = lane_cfg.simulator_root
+    os.environ["ROBOTWIN_BENCH_PYTHON"] = lane_cfg.simulator_python
     spec = load_spec_file(lane_cfg.spec)
-    found = discover(spec)
+    found = discover(spec, prepare=True)
     problems = [f"{name}: {'; '.join(p.problems)}" for name, p in found.items() if not p.ok]
     if problems:
         return False, " | ".join(problems)
-    return True, ", ".join(f"{name} {p.version}" for name, p in found.items())
+    return True, ", ".join(
+        f"{name} at {p.workdir}, harness {p.benchmark.harness()['source_sha256'][:12]}"
+        for name, p in found.items()
+    )
 
 
 def miner_checks(competition: str) -> list[Check]:
@@ -301,7 +308,7 @@ def validator_checks(cfg: Any, competition: str) -> list[Check]:
             _check(
                 "simulator interpreter",
                 lambda: _interpreter(
-                    lane_cfg.simulator_python, ("robotwin_bench", "robotensor_benchmark_robotwin")
+                    lane_cfg.simulator_python, ("sapien", "imageio_ffmpeg", "vector_policy.client")
                 ),
             ),
             _check(

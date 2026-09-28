@@ -60,6 +60,8 @@ class VectorConfig(LaneConfig):
     cache: Path = Path()
     policy_python: str = ""
     simulator_python: str = ""
+    #: The RoboTwin-Vector checkout the simulator runs from: its harness is run there, never installed.
+    simulator_root: str = ""
     duel_size: str | None = None
     #: The genesis baseline's commit, when the spec's is null.
     genesis_revision: str | None = None
@@ -223,7 +225,7 @@ def _renamed(
 
 def _vector(name: str, table: dict[str, Any], base: Path, path: Path) -> VectorConfig:
     _refuse_unknown(f"[lanes.{name}]", table, VECTOR_KEYS, path)
-    for required in ("spec", "policy_python", "simulator_python"):
+    for required in ("spec", "policy_python", "simulator_python", "simulator_root"):
         if not table.get(required):
             raise ConfigError(f"{path}: [lanes.{name}] needs {required}")
     return VectorConfig(
@@ -236,6 +238,7 @@ def _vector(name: str, table: dict[str, Any], base: Path, path: Path) -> VectorC
         cache=_path(base, table.get("cache", "var/vector/cache")),
         policy_python=os.path.expandvars(str(table["policy_python"])),
         simulator_python=os.path.expandvars(str(table["simulator_python"])),
+        simulator_root=str(_path(base, os.path.expandvars(str(table["simulator_root"])))),
         duel_size=table.get("duel_size") or None,
         genesis_revision=table.get("genesis_revision") or None,
         private_window_blocks=int(table.get("private_window_blocks", 300)),

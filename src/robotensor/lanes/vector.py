@@ -78,7 +78,8 @@ class VectorLane:
         return self._engine
 
     def _build_engine(self) -> Any:
-        # The benchmark plugin builds its commands for this interpreter.
+        # Where the orchestrator's RoboTwin driver finds the checkout it runs, and its interpreter.
+        os.environ["ROBOTWIN_BENCH_ROOT"] = self.cfg.simulator_root
         os.environ["ROBOTWIN_BENCH_PYTHON"] = self.cfg.simulator_python
         from vector_orchestrator.canon import Signer
         from vector_orchestrator.duel.orchestrate import Orchestrator

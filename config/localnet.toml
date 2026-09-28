@@ -29,6 +29,7 @@ run_dir = "var/localnet/vector/runs"
 cache = "/root/robotensor/.cache/weights"
 policy_python = "/root/robotensor/.venvs/vector-policy/bin/python"
 simulator_python = "/root/robotensor/.venvs/robotwin-bench/bin/python"
+simulator_root = "/root/robotensor/vector/RoboTwin-Vector"
 # The rehearsal plays 48 units a side (3 per task): enough for the sign test to call a clear win.
 duel_size = "light"
 genesis_revision = ""

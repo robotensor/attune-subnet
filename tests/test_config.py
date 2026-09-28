@@ -17,6 +17,7 @@ share = 0.30
 spec = "specs/vector_level1.json"
 policy_python = "python"
 simulator_python = "python"
+simulator_root = "/checkout/RoboTwin-Vector"
 """
 
 
@@ -78,6 +79,18 @@ def test_a_lane_that_names_no_contract_is_refused(tmp_path):
 
 
 HORIZON = GOOD + "\n[lanes.horizon]\nshare = 0.0\n"
+
+
+def test_the_vector_lane_names_the_robotwin_checkout_it_runs(tmp_path):
+    # The harness is run from its checkout, never installed: without the checkout there is no duel.
+    assert load(write(tmp_path, GOOD)).vector.simulator_root == "/checkout/RoboTwin-Vector"
+    relative = GOOD.replace('"/checkout/RoboTwin-Vector"', '"checkouts/RoboTwin-Vector"')
+    assert load(write(tmp_path, relative)).vector.simulator_root == str(
+        tmp_path / "checkouts" / "RoboTwin-Vector"
+    )
+    without = GOOD.replace('simulator_root = "/checkout/RoboTwin-Vector"\n', "")
+    with pytest.raises(ConfigError, match="needs simulator_root"):
+        load(write(tmp_path, without))
 
 
 def test_horizon_keeps_its_rounds_under_the_root_unless_the_config_says_where(tmp_path):

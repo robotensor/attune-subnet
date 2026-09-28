@@ -308,13 +308,14 @@ def validator_checks(cfg: Any, competition: str) -> list[Check]:
             _check(
                 "simulator interpreter",
                 lambda: _interpreter(
-                    lane_cfg.simulator_python, ("sapien", "imageio_ffmpeg", "vector_policy.client")
+                    lane_cfg.simulator_python,
+                    ("sapien", "imageio_ffmpeg", "vector_protocol.client"),
                 ),
             ),
             _check(
                 "policy interpreter",
                 lambda: _interpreter(
-                    lane_cfg.policy_python, ("vector_runtime.policy", "vector_policy")
+                    lane_cfg.policy_python, ("vector_runtime.policy", "vector_protocol")
                 ),
             ),
         ]

@@ -13,14 +13,15 @@ metadata) are a `duplicate` - the earliest commitment keeps them. Otherwise the 
 `queued`. A hotkey's new commitment supersedes its entry still waiting in the queue: the chain keeps
 one commitment per hotkey.
 
-**Duels.** The queue is served oldest commitment first. Before the first duel the track's declared
-baseline (`robotensor/vector-base`) takes the empty throne by genesis. Each
-duel is seeded from a block after the challenger's commitment (`protocol.seed`) and run by
-`Orchestrator.run`, which publishes a record: the crown moves only when the challenger beats
-the king by the margin and the paired sign test says it is no accident.
+**Duels.** The queue is served oldest commitment first. The empty throne is taken by genesis: by
+the track's baseline when the contract declares one, otherwise by the oldest queued entry, scored
+on its own units (`vector_level1` declares none). Each duel is seeded from a block after the
+challenger's commitment (`protocol.seed`) and run by `Orchestrator.run`, which publishes a record:
+the crown moves only when the challenger beats the king by the margin and the paired sign test
+says it is no accident.
 
 **Champions.** The lane's champions are read back from the store: every record that crowned a
-model, newest first, each mapped to the hotkey that committed it (the baseline maps to none).
+model, newest first, each mapped to the hotkey that committed it (a baseline maps to none).
 """
 
 from __future__ import annotations
@@ -200,7 +201,7 @@ class VectorLane:
     # -- duels ------------------------------------------------------------------------------
 
     def ready(self) -> bool:
-        """Whether the store has a king: the baseline's genesis has been published."""
+        """Whether the store has a king: a genesis has been published."""
         return bool((self.engine.store.head(TRACK) or {}).get("king"))
 
     def genesis(self, chain: Any) -> dict[str, Any]:
@@ -272,8 +273,8 @@ class VectorLane:
             raise
         doc = result.as_dict()
         outcome = (doc.get("record") or {}) if result.published else {}
-        if result.published and outcome.get("dethroned"):
-            status = "crowned"
+        if result.published and (king is None or outcome.get("dethroned")):
+            status = "crowned"  # a genesis crowns its entrant; a duel, a challenger that won
         elif result.published:
             status = "duelled"
         else:
@@ -297,7 +298,7 @@ class VectorLane:
         """One duel, or the genesis before the first one. Never raises the orchestrator's."""
         from vector_orchestrator.duel.orchestrate import CrownMoved, DuelFailed
 
-        if not self.ready():
+        if not self.ready() and self.spec.baseline(TRACK):
             log.info("the throne is empty: crowning the baseline by genesis")
             try:
                 result = self.genesis(chain)
@@ -307,6 +308,8 @@ class VectorLane:
         queue = self.queue()
         if not queue:
             return Progress(LANE, IDLE, "nothing queued")
+        # With no baseline declared, the oldest entry takes the empty throne: `duel` with no king
+        # is the orchestrator's genesis.
         entry = queue[0]
         log.info(
             "duel: %s from %s (committed at %s)", entry.entry, entry.hotkey, entry.commit_block
@@ -348,18 +351,23 @@ class VectorLane:
 
     def champions(self) -> list[str | None]:
         """Every model this lane crowned, newest first, as the hotkey that committed it; None for
-        the genesis baseline. Read from the store's index."""
+        a genesis baseline, which no hotkey committed. Read from the store's index."""
         from vector_orchestrator.ids import submission_key
 
         entries = self.state.lane(LANE)["entries"]
         crowned = []
         for record in self.engine.store.iter_index(TRACK):
             if record.get("kind") == "genesis":
+                king = record.get("king")  # a genesis names what it crowns in its king slot
+            elif record.get("dethroned"):
+                king = record.get("new_king")
+            else:
+                continue
+            if not isinstance(king, dict):
                 crowned.append(None)
-            elif record.get("dethroned") and isinstance(record.get("new_king"), dict):
-                king = record["new_king"]
-                key = king.get("key") or submission_key(king["repo"], king["revision"])
-                crowned.append((entries.get(key) or {}).get("hotkey"))
+                continue
+            key = king.get("key") or submission_key(king["repo"], king["revision"])
+            crowned.append((entries.get(key) or {}).get("hotkey"))
         return list(reversed(crowned))
 
     @staticmethod

@@ -159,6 +159,7 @@ def test_a_step_reports_the_engines_failure_rather_than_raising_it(lane, monkeyp
     from robotensor.lanes.base import FAILED
 
     monkeypatch.setattr(type(lane), "ready", lambda self: False)
+    monkeypatch.setattr(type(lane), "spec", property(lambda self: _with_baseline()))
     monkeypatch.setattr(
         type(lane), "genesis", lambda self, chain: (_ for _ in ()).throw(DuelFailed("no harness"))
     )
@@ -167,6 +168,107 @@ def test_a_step_reports_the_engines_failure_rather_than_raising_it(lane, monkeyp
 
     assert progress.outcome == FAILED and "no harness" in progress.detail
     assert progress.resting and progress.lane == "vector"
+
+
+def _with_baseline():
+    return SimpleNamespace(baseline=lambda track: {"repo": "robotensor/vector-base", "revision": A})
+
+
+class FakeChain:
+    def block(self):
+        return 1000
+
+    def block_hash(self, block):
+        return "0x" + "ab" * 32
+
+
+def test_the_contract_declares_no_baseline(lane):
+    assert lane.spec.baseline("vector_level1") is None
+
+
+def test_with_no_baseline_an_empty_throne_waits_for_its_first_entry(lane, monkeypatch):
+    from robotensor.lanes.base import IDLE
+
+    monkeypatch.setattr(
+        type(lane), "genesis", lambda self, chain: pytest.fail("no baseline to crown")
+    )
+    assert lane.step(chain=FakeChain()).outcome == IDLE
+
+
+def test_with_no_baseline_the_oldest_entry_takes_the_empty_throne(lane, monkeypatch):
+    """The first entry duels no king, which the orchestrator runs as a genesis; it is crowned
+    though a genesis record is never `dethroned`."""
+    from robotensor.lanes.base import WORKED
+
+    lane.intake(
+        [c("hk2", "m/two", B, 20), c("hk1", "m/one", A, 10)],
+        30,
+        api=FakeHub(
+            {f"m/one@{A}": {"model.safetensors": "w1"}, f"m/two@{B}": {"model.safetensors": "w2"}}
+        ),
+    )
+    asked = []
+
+    def run(req):
+        asked.append(req)
+        return SimpleNamespace(
+            published=True,
+            status="published",
+            reason="genesis",
+            event_id="e1",
+            as_dict=lambda: {
+                "reason": "genesis",
+                "record": {"kind": "genesis", "dethroned": False},
+            },
+        )
+
+    monkeypatch.setattr(lane.engine, "run", run)
+    monkeypatch.setattr(
+        type(lane), "genesis", lambda self, chain: pytest.fail("no baseline to crown")
+    )
+
+    progress = lane.step(chain=FakeChain())
+
+    assert progress.outcome == WORKED
+    (req,) = asked
+    assert req.king is None and req.challenger.repo == "m/one" and req.kind == "genesis"
+    entries = lane.state.lane("vector")["entries"]
+    assert {r["hotkey"]: r["status"] for r in entries.values()} == {
+        "hk1": "crowned",
+        "hk2": "queued",
+    }
+
+
+def test_a_genesis_crowns_the_hotkey_of_its_entrant_and_a_baseline_crowns_none(lane, monkeypatch):
+    from vector_orchestrator.ids import submission_key
+
+    lane.intake(
+        [c("hk1", "m/one", A, 10), c("hk2", "m/two", B, 20)],
+        30,
+        api=FakeHub(
+            {f"m/one@{A}": {"model.safetensors": "w1"}, f"m/two@{B}": {"model.safetensors": "w2"}}
+        ),
+    )
+    one = {"key": submission_key("m/one", A), "repo": "m/one", "revision": A}
+    two = {"key": submission_key("m/two", B), "repo": "m/two", "revision": B}
+    base = {
+        "key": submission_key("robotensor/vector-base", C),
+        "repo": "robotensor/vector-base",
+        "revision": C,
+    }
+    records = {
+        "entrant": [
+            {"kind": "genesis", "king": one, "dethroned": False},
+            {"kind": "duel", "king": one, "dethroned": False},
+            {"kind": "duel", "king": one, "new_king": two, "dethroned": True},
+        ],
+        "baseline": [{"kind": "genesis", "king": base, "dethroned": False}],
+    }
+    store = lane.engine.store
+    monkeypatch.setattr(store, "iter_index", lambda track: iter(records["entrant"]))
+    assert lane.champions() == ["hk2", "hk1"]
+    monkeypatch.setattr(store, "iter_index", lambda track: iter(records["baseline"]))
+    assert lane.champions() == [None]
 
 
 def test_a_seed_block_that_is_not_final_yet_is_waiting_not_a_failure(lane, monkeypatch):

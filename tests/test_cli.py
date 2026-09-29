@@ -1,5 +1,7 @@
 """One command for both halves of the subnet: what it routes, and which competition it means."""
 
+import sys
+
 import pytest
 
 from robotensor.cli import COMPETITION_ENV, CompetitionError, build_parser, competition
@@ -134,3 +136,5 @@ def test_submit_is_one_command_in_the_order_that_keeps_weights_yours():
     )
 
     assert args.command == "submit" and not args.keep_private
+
+

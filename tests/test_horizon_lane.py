@@ -163,26 +163,18 @@ def test_with_no_closed_round_there_is_nobody_to_pay(lane):
     assert list(award.entries) == [] and award.keep == 1 and award.decay == 0.0
 
 
-def test_a_share_above_zero_without_serve_as_is_refused(tmp_path):
+def test_a_share_above_zero_without_serve_as_is_refused(tmp_path, monkeypatch):
     """A model served as the user running the validator can read `private/expert.npz` - the
     answer key for the episode it is being scored on."""
+    from robotensor import config
     from robotensor.config import load
 
+    monkeypatch.setitem(config.SHARES, "horizon", 0.70)
     path = tmp_path / "c.toml"
-    path.write_text(
-        '[chain]\nnetwork = "test"\nnetuid = 2\n'
-        "[validator]\nburn_remainder = true\n"
-        "[lanes.horizon]\nshare = 0.70\n"
-    )
-
+    path.write_text('network = "test"\nnetuid = 2\n[horizon]\n')
     with pytest.raises(ConfigError, match="serve_as"):
         load(path)
-
-    path.write_text(
-        '[chain]\nnetwork = "test"\nnetuid = 2\n'
-        "[validator]\nburn_remainder = true\n"
-        '[lanes.horizon]\nshare = 0.70\nserve_as = "horizon"\n'
-    )
+    path.write_text('network = "test"\nnetuid = 2\n[horizon]\nserve_as = "horizon"\n')
     assert load(path).horizon.serve_as == "horizon"
 
 

@@ -83,7 +83,7 @@ class Award:
 class Lane(Protocol):
     """The whole of what the validator asks of a competition."""
 
-    #: The name the chain's commitments carry and the config's `[lanes.<name>]` table uses.
+    #: The name the chain's commitments carry and the config's `[<name>]` table uses.
     name: str
 
     def intake(self, commitments: Sequence[Any], block: int, *, api: Any = None) -> list[Any]:

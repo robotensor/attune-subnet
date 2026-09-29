@@ -154,11 +154,7 @@ def _wallet(cfg: Any) -> tuple[bool, str]:
 def _shares(cfg: Any) -> tuple[bool, str]:
     total = sum(cfg.shares.values())
     said = ", ".join(f"{name} {share:.0%}" for name, share in sorted(cfg.shares.items()))
-    if abs(total - 1.0) <= 1e-9:
-        return True, said
-    if cfg.burn_remainder:
-        return True, f"{said}; the rest burns ({1 - total:.0%}), as the config says it may"
-    return False, f"{said}: they do not claim the whole emission"
+    return True, said if total >= 1 - 1e-9 else f"{said}; the rest ({1 - total:.0%}) burns"
 
 
 def _interpreter(path: str, imports: tuple[str, ...]) -> tuple[bool, str]:
@@ -195,7 +191,7 @@ def _horizon_engine(lane_cfg: Any) -> tuple[bool, str]:
     import subprocess
 
     if not lane_cfg.competition:
-        return True, "no engine config named ([lanes.horizon].competition); nothing to run yet"
+        return True, "no engine config named ([horizon].competition); nothing to run yet"
     python = lane_cfg.engine_python or sys.executable
     done = subprocess.run(
         [
@@ -227,30 +223,32 @@ def _horizon_engine(lane_cfg: Any) -> tuple[bool, str]:
 
 
 def _vector_contract(lane_cfg: Any) -> tuple[bool, str]:
-    from vector_orchestrator.spec import load_spec_file
+    from vector_orchestrator.spec import load_spec
 
-    spec = load_spec_file(lane_cfg.spec)
-    tracks = ", ".join(spec.tracks)
-    return True, f"{lane_cfg.spec.name}: {tracks} at {spec.fingerprint[:12]}"
+    spec = load_spec()
+    return (
+        True,
+        f"{spec.path.name}: {len(spec.tasks)} tasks x {spec.runs_per_task} at {spec.fingerprint[:12]}",
+    )
 
 
 def _vector_benchmark(lane_cfg: Any) -> tuple[bool, str]:
-    """The RoboTwin-Vector checkout, asked what a duel needs: its task table, each suite's config
-    (with the assets it loads) and the harness it runs, under the simulator's interpreter."""
-    from vector_orchestrator.benchmarks.drivers import discover
-    from vector_orchestrator.spec import load_spec_file
+    """The RoboTwin-Vector checkout, asked what a duel needs: the spec's tasks and the level's
+    config (with the assets it loads), under the simulator's interpreter."""
+    from vector_orchestrator.robotwin import RoboTwin, Unavailable
+    from vector_orchestrator.spec import load_spec
 
-    os.environ["ROBOTWIN_BENCH_ROOT"] = lane_cfg.simulator_root
-    os.environ["ROBOTWIN_BENCH_PYTHON"] = lane_cfg.simulator_python
-    spec = load_spec_file(lane_cfg.spec)
-    found = discover(spec, prepare=True)
-    problems = [f"{name}: {'; '.join(p.problems)}" for name, p in found.items() if not p.ok]
-    if problems:
-        return False, " | ".join(problems)
-    return True, ", ".join(
-        f"{name} at {p.workdir}, harness {p.benchmark.harness()['source_sha256'][:12]}"
-        for name, p in found.items()
-    )
+    spec = load_spec()
+    environ = {
+        "ROBOTWIN_BENCH_ROOT": lane_cfg.simulator_root,
+        "ROBOTWIN_BENCH_PYTHON": lane_cfg.simulator_python,
+    }
+    try:
+        fork = RoboTwin.from_environment(spec.level, environ)
+        fork.prepare(spec.tasks)
+    except Unavailable as exc:
+        return False, str(exc)
+    return True, f"{fork.workdir}, harness {fork.info()['source_sha256'][:12]}"
 
 
 def miner_checks(competition: str) -> list[Check]:

@@ -17,7 +17,7 @@ hash together, neither alone (`protocol.schedule.entropy`).
 **Staged, and honest about it.** What is here is what the chain can do with no simulator: the
 prefix, the schedule, intake and status. Running a round is the next stage, and until then a
 `step` says which round is open, how many entrants it holds, and that nothing scores them yet. The
-lane's share stays 0 while that is true, and the config refuses to pay anything without
+lane's share (`config.SHARES`) stays 0 while that is true, and the config refuses to pay without
 `serve_as`, because a model served as the validator's own user could read the answer key of the
 episode it is being scored on.
 """
@@ -126,7 +126,7 @@ def shape_from(layout: dict[str, Any], max_bytes: int) -> hub.Shape:
 
 
 class HorizonLane:
-    #: What the chain's commitments carry and `[lanes.horizon]` configures.
+    #: What the chain's commitments carry and `[horizon]` configures.
     name = LANE
 
     def __init__(self, cfg: HorizonConfig, state: State, *, hub_token: str | None = None) -> None:

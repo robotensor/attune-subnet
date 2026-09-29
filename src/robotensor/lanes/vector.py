@@ -1,9 +1,8 @@
 """Robotensor Vector: chain commitments in, king-of-the-hill duels out, through its orchestrator.
 
 This module is the chain's side of the lane and nothing else. The lane engine is
-`vector_orchestrator` (duels, the weights runtime, the store), run as a library on the
-`vector_level1` contract (`specs/vector_level1.json` in the orchestrator); the benchmark is the RoboTwin-Vector fork's
-plugin; the model code is `vector_runtime`. What happens here:
+`vector_orchestrator` (duels, the weights runtime, the store), run as a library on its `spec.json`;
+the benchmark is the RoboTwin-Vector checkout; the model code is `vector_runtime`. What happens here:
 
 **Intake.** Every `vector:` commitment on chain is read with the block it was made at. A new one is
 looked up on the Hub (`hub.inspect`): a repository holding anything but the weights and a README is
@@ -13,15 +12,14 @@ metadata) are a `duplicate` - the earliest commitment keeps them. Otherwise the 
 `queued`. A hotkey's new commitment supersedes its entry still waiting in the queue: the chain keeps
 one commitment per hotkey.
 
-**Duels.** The queue is served oldest commitment first. The empty throne is taken by genesis: by
-the track's baseline when the contract declares one, otherwise by the oldest queued entry, scored
-on its own units (`vector_level1` declares none). Each duel is seeded from a block after the
-challenger's commitment (`protocol.seed`) and run by `Orchestrator.run`, which publishes a record:
-the crown moves only when the challenger beats the king by the margin and the paired sign test
-says it is no accident.
+**Duels.** The queue is served oldest commitment first; the oldest takes an empty throne by
+genesis, scored on its own units. Each duel is seeded from a block after the challenger's
+commitment (`protocol.seed`) and run by `Orchestrator.run`, which publishes a record: the crown
+moves only when the challenger beats the king by the margin and the paired sign test says it is no
+accident. The queue is written to the store (`queue.json`) for the dashboard.
 
 **Champions.** The lane's champions are read back from the store: every record that crowned a
-model, newest first, each mapped to the hotkey that committed it (a baseline maps to none).
+model, newest first, each mapped to the hotkey that committed it.
 """
 
 from __future__ import annotations
@@ -43,7 +41,6 @@ from .base import FAILED, IDLE, WAITING, WORKED, Award, Progress
 log = logging.getLogger(__name__)
 
 LANE = "vector"
-TRACK = "vector_level1"
 
 
 @dataclass(frozen=True)
@@ -61,7 +58,7 @@ class Entry:
 
 
 class VectorLane:
-    #: What the chain's commitments carry and `[lanes.vector]` configures.
+    #: What the chain's commitments carry and `[vector]` configures.
     name = LANE
 
     def __init__(self, cfg: VectorConfig, state: State, *, hub_token: str | None = None) -> None:
@@ -87,9 +84,7 @@ class VectorLane:
         from vector_orchestrator.spec import load_spec
         from vector_orchestrator.store.writer import Store, store_lock
 
-        spec = load_spec(self.cfg.spec)
-        if TRACK not in spec.tracks:
-            raise ValueError(f"{self.cfg.spec} declares no track {TRACK}")
+        spec = load_spec()
         store = Store(self.cfg.store, spec)
         if store.manifest() is None:
             with store_lock(store.root):
@@ -115,12 +110,10 @@ class VectorLane:
 
     @property
     def shape(self) -> hub.Shape:
-        """What the contract says a submission may hold: weights of the pinned architecture, a
-        README, and nothing that runs."""
-        model = self.spec.model
-        return hub.vector_shape(
-            model["allowed_files"], int(self.spec.submission.get("max_repo_bytes", 0) or 0)
-        )
+        """What a submission may hold: `model.safetensors`, a README, and nothing that runs."""
+        from vector_orchestrator.duel.weights_runtime import ALLOWED_FILES, MAX_REPO_BYTES
+
+        return hub.vector_shape(ALLOWED_FILES, MAX_REPO_BYTES)
 
     # -- intake -----------------------------------------------------------------------------
 
@@ -202,34 +195,9 @@ class VectorLane:
 
     def ready(self) -> bool:
         """Whether the store has a king: a genesis has been published."""
-        return bool((self.engine.store.head(TRACK) or {}).get("king"))
+        return bool((self.engine.store.head() or {}).get("king"))
 
-    def genesis(self, chain: Any) -> dict[str, Any]:
-        """Crown the declared baseline on the empty throne, seeded from the chain's head."""
-        from vector_orchestrator.duel.orchestrate import DuelRequest
-        from vector_orchestrator.store.writer import store_lock
-
-        baseline = self.spec.baseline(TRACK) or {}
-        revision = baseline.get("revision") or self.cfg.genesis_revision
-        if not baseline.get("repo") or not revision:
-            raise ValueError("the spec declares no baseline commit and the config names none")
-        ref = self.engine.runtime.resolve(str(baseline["repo"]), str(revision))
-        block = chain.block() - seed_.FINALITY
-        seed = seed_.Seed(block, seed_.normalize_hash(chain.block_hash(block)))
-        req = DuelRequest(
-            TRACK,
-            ref,
-            None,
-            baseline.get("size"),
-            block=self._claim_block(),
-            seed_block=seed.block,
-            seed_block_hash=seed.block_hash,
-        )
-        with store_lock(self.engine.store.root):
-            result = self.engine.run(req)
-        return result.as_dict()
-
-    def duel(self, entry: Entry, chain: Any, size: str | None = None) -> dict[str, Any]:
+    def duel(self, entry: Entry, chain: Any) -> dict[str, Any]:
         """Duel `entry` against the king, seeded from a block after its commitment. Raises
         `seed.NotYet` when the chain has not moved far enough, and the orchestrator's
         `HarnessUnavailable`/`DuelFailed` when the harness cannot run it (the entry stays queued)."""
@@ -237,7 +205,7 @@ class VectorLane:
         from vector_orchestrator.ids import SubmissionRef
         from vector_orchestrator.store.writer import store_lock
 
-        head = self.engine.store.head(TRACK) or {}
+        head = self.engine.store.head() or {}
         king = SubmissionRef.from_dict(head.get("king"))
         challenger = SubmissionRef.resolved(entry.repo, entry.revision)
         lane = self.state.lane(LANE)
@@ -254,10 +222,8 @@ class VectorLane:
             req = DuelRequest.from_dict(request)
         else:
             req = DuelRequest(
-                TRACK,
                 challenger,
                 king,
-                size or self.cfg.duel_size,
                 block=self._claim_block(),
                 seed_block=seed.block,
                 seed_block_hash=seed.block_hash,
@@ -287,7 +253,7 @@ class VectorLane:
     def _claim_block(self) -> int:
         """The next number in the lane's own duel sequence (the orchestrator's `block`)."""
         lane = self.state.lane(LANE)
-        head = int((self.engine.store.head(TRACK) or {}).get("block") or 0)
+        head = int((self.engine.store.head() or {}).get("block") or 0)
         lane["block_counter"] = max(int(lane["block_counter"]), head) + 1
         self.state.save()
         return int(lane["block_counter"])
@@ -295,21 +261,14 @@ class VectorLane:
     # -- the validator's view ----------------------------------------------------------------
 
     def step(self, chain: Any) -> Progress:
-        """One duel, or the genesis before the first one. Never raises the orchestrator's."""
+        """One duel: the oldest entry against the king, or on an empty throne a genesis (`duel`
+        with no king). Never raises the orchestrator's."""
         from vector_orchestrator.duel.orchestrate import CrownMoved, DuelFailed
 
-        if not self.ready() and self.spec.baseline(TRACK):
-            log.info("the throne is empty: crowning the baseline by genesis")
-            try:
-                result = self.genesis(chain)
-            except DuelFailed as exc:
-                return Progress(LANE, FAILED, f"genesis: {exc}")
-            return Progress(LANE, WORKED, f"genesis: {result['reason']}", result.get("record"))
         queue = self.queue()
+        self.publish_queue(queue)
         if not queue:
             return Progress(LANE, IDLE, "nothing queued")
-        # With no baseline declared, the oldest entry takes the empty throne: `duel` with no king
-        # is the orchestrator's genesis.
         entry = queue[0]
         log.info(
             "duel: %s from %s (committed at %s)", entry.entry, entry.hotkey, entry.commit_block
@@ -327,10 +286,33 @@ class VectorLane:
         record = result.get("record") or {}
         detail = (
             f"{result['reason']}; dethroned={record.get('dethroned')} "
-            f"king={record.get('king_scores', {}).get('average')} "
-            f"challenger={record.get('challenger_scores', {}).get('average')}"
+            f"king={record.get('king_score')} challenger={record.get('challenger_score')}"
         )
+        self.publish_queue(self.queue())
         return Progress(LANE, WORKED, detail, record)
+
+    def publish_queue(self, queue: list[Entry]) -> None:
+        """The waiting entries into the store's `queue.json`, as the dashboard shows them; pushed
+        to the mirror only when they changed."""
+        from vector_orchestrator.ids import submission_key
+        from vector_orchestrator.store.writer import read_json
+
+        snapshot = {
+            "entries": [
+                {
+                    "key": submission_key(e.repo, e.revision),
+                    "repo": e.repo,
+                    "revision": e.revision,
+                    "block": e.commit_block,
+                }
+                for e in queue
+            ]
+        }
+        store = self.engine.store
+        if read_json(store.queue_path()) == snapshot:
+            return
+        store.write_queue(snapshot)
+        self.engine.push_touched()
 
     def award(self) -> Award:
         """The champion pool of the subnet spec: the five newest crowned models, paid equally."""
@@ -338,9 +320,8 @@ class VectorLane:
 
     def snapshot(self) -> dict[str, Any]:
         """Where the competition stands: the king, the champions, the queue and every entry."""
-        head = self.engine.store.head(TRACK) or {}
+        head = self.engine.store.head() or {}
         return {
-            "track": TRACK,
             "king": head.get("king"),
             "champions": self.champions(),
             "queue": [e.__dict__ for e in self.queue()],
@@ -351,16 +332,16 @@ class VectorLane:
 
     def champions(self) -> list[str | None]:
         """Every model this lane crowned, newest first, as the hotkey that committed it; None for
-        a genesis baseline, which no hotkey committed. Read from the store's index."""
+        one no entry of this validator's committed. Read from the store's index."""
         from vector_orchestrator.ids import submission_key
 
         entries = self.state.lane(LANE)["entries"]
         crowned = []
-        for record in self.engine.store.iter_index(TRACK):
+        for record in self.engine.store.iter_index():
             if record.get("kind") == "genesis":
                 king = record.get("king")  # a genesis names what it crowns in its king slot
             elif record.get("dethroned"):
-                king = record.get("new_king")
+                king = record.get("challenger")
             else:
                 continue
             if not isinstance(king, dict):

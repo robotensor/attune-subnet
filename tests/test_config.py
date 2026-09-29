@@ -1,116 +1,108 @@
-"""Reading a config: what it refuses, and where its relative paths hang from."""
+"""The validator's config: only what differs between hosts, everything else fixed in code."""
+
+from pathlib import Path
 
 import pytest
 
-from robotensor.config import ConfigError, load
+from robotensor.config import SHARES, ConfigError, load
 
-GOOD = """
-[chain]
-network = "ws://127.0.0.1:9944"
-netuid = 2
+GOOD = """\
+network = "test"
+netuid = 7
+wallet = { name = "owner", hotkey = "hot" }
 
-[validator]
-burn_remainder = true
-
-[lanes.vector]
-share = 0.30
-spec = "specs/vector_level1.json"
-policy_python = "python"
-simulator_python = "python"
+[vector]
+policy_python = "/env/policy/bin/python"
+simulator_python = "/env/sim/bin/python"
 simulator_root = "/checkout/RoboTwin-Vector"
 """
 
 
-def write(tmp_path, text, name="config.toml"):
-    path = tmp_path / name
+def write(directory: Path, text: str, name: str = "c.toml") -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
     path.write_text(text)
     return path
 
 
-def test_relative_paths_hang_from_the_config_file_unless_it_says_otherwise(tmp_path):
+def test_a_host_config_loads_and_the_rest_is_fixed(tmp_path):
     cfg = load(write(tmp_path, GOOD))
-
-    assert cfg.root == tmp_path
-    assert cfg.vector.spec == tmp_path / "specs" / "vector_level1.json"
-    assert cfg.state == tmp_path / "var" / "validator-state"
-
-
-def test_paths_root_moves_where_everything_hangs_from(tmp_path):
-    (tmp_path / "config").mkdir()
-    path = write(tmp_path / "config", '[paths]\nroot = ".."\n' + GOOD)
-
-    cfg = load(path)
-
-    assert cfg.root == tmp_path and cfg.vector.spec == tmp_path / "specs" / "vector_level1.json"
-
-
-def test_a_key_this_build_does_not_know_is_refused_by_name(tmp_path):
-    """A typo is otherwise read as "not set", and the validator runs something else."""
-    with pytest.raises(ConfigError, match="policy_pythonn"):
-        load(write(tmp_path, GOOD.replace("policy_python =", "policy_pythonn =")))
-
-    with pytest.raises(ConfigError, match="burn_hotkeys"):
-        load(write(tmp_path, GOOD.replace("burn_remainder = true", "burn_hotkeys = 'x'")))
-
-
-def test_a_competition_this_build_does_not_run_is_refused(tmp_path):
-    with pytest.raises(ConfigError, match="horizon"):
-        load(write(tmp_path, GOOD + "\n[lanes.horizon]\nshare = 0.70\n"))
-
-
-def test_shares_that_do_not_claim_the_whole_emission_need_saying_so(tmp_path):
-    """Burning most of a subnet's emission is a decision, not a default: without
-    `burn_remainder` the shares must add up."""
-    with pytest.raises(ConfigError, match="0.3 of the emission"):
-        load(write(tmp_path, GOOD.replace("burn_remainder = true", "")))
-
-    whole = GOOD.replace("burn_remainder = true", "").replace("share = 0.30", "share = 1.0")
-    assert load(write(tmp_path, whole)).shares == {"vector": 1.0}
-
-
-def test_shares_over_the_whole_emission_are_refused(tmp_path):
-    with pytest.raises(ConfigError, match="sum to at most 1"):
-        load(write(tmp_path, GOOD.replace("share = 0.30", "share = 1.30")))
-
-
-def test_a_lane_that_names_no_contract_is_refused(tmp_path):
-    with pytest.raises(ConfigError, match="needs spec"):
-        load(write(tmp_path, GOOD.replace('spec = "specs/vector_level1.json"', "")))
-
-
-HORIZON = GOOD + "\n[lanes.horizon]\nshare = 0.0\n"
-
-
-def test_the_vector_lane_names_the_robotwin_checkout_it_runs(tmp_path):
-    # The harness is run from its checkout, never installed: without the checkout there is no duel.
-    assert load(write(tmp_path, GOOD)).vector.simulator_root == "/checkout/RoboTwin-Vector"
-    relative = GOOD.replace('"/checkout/RoboTwin-Vector"', '"checkouts/RoboTwin-Vector"')
-    assert load(write(tmp_path, relative)).vector.simulator_root == str(
-        tmp_path / "checkouts" / "RoboTwin-Vector"
+    assert (cfg.network, cfg.netuid, cfg.wallet_name, cfg.wallet_hotkey, cfg.wallet_path) == (
+        "test",
+        7,
+        "owner",
+        "hot",
+        None,
     )
-    without = GOOD.replace('simulator_root = "/checkout/RoboTwin-Vector"\n', "")
-    with pytest.raises(ConfigError, match="needs simulator_root"):
-        load(write(tmp_path, without))
+    assert cfg.shares == {"vector": SHARES["vector"]} == {"vector": 0.30}
+    assert cfg.weights_interval_blocks == 360
+    vector = cfg.vector
+    assert vector.simulator_root == "/checkout/RoboTwin-Vector" and vector.mirror == ""
+    assert (vector.workers, vector.policy_kwargs, vector.private_window_blocks) == (
+        4,
+        {"device": "cuda:0"},
+        300,
+    )
 
 
-def test_horizon_keeps_its_rounds_under_the_root_unless_the_config_says_where(tmp_path):
-    assert load(write(tmp_path, HORIZON)).horizon.rounds == tmp_path / "var" / "horizon" / "rounds"
-
-    cfg = load(write(tmp_path, HORIZON + 'rounds = "runs/rounds"\n'))
-
-    assert cfg.horizon.rounds == tmp_path / "runs" / "rounds"
-
-
-def test_a_config_written_when_rounds_were_epochs_still_runs(tmp_path):
-    """`epochs` is what `[lanes.horizon]` called the rounds' directory: read as `rounds`."""
-    cfg = load(write(tmp_path, HORIZON + 'epochs = "var/horizon/epochs"\n'))
-
-    assert cfg.horizon.rounds == tmp_path / "var" / "horizon" / "epochs"
+def test_data_is_kept_beside_the_config_or_in_var_name_for_one_in_config(tmp_path):
+    here = load(write(tmp_path / "work", GOOD))
+    assert (
+        here.data == tmp_path / "work" / "var" and here.state == tmp_path / "work" / "var" / "state"
+    )
+    assert here.vector.store == tmp_path / "work" / "var" / "vector" / "store"
+    repo = load(write(tmp_path / "repo" / "config", GOOD, "testnet.toml"))
+    assert repo.data == tmp_path / "repo" / "var" / "testnet" and repo.root == tmp_path / "repo"
+    assert repo.vector.run_dir == tmp_path / "repo" / "var" / "testnet" / "vector" / "runs"
 
 
-def test_a_key_under_both_its_names_is_refused(tmp_path):
-    """Which of the two was meant cannot be told."""
-    both = HORIZON + 'epochs = "var/horizon/epochs"\nrounds = "var/horizon/rounds"\n'
+def test_relative_paths_hang_from_the_root(tmp_path):
+    text = GOOD.replace('"/checkout/RoboTwin-Vector"', '"RoboTwin-Vector"').replace(
+        'hotkey = "hot" }', 'hotkey = "hot", path = "var/wallets" }'
+    )
+    cfg = load(write(tmp_path / "repo" / "config", text, "localnet.toml"))
+    assert cfg.vector.simulator_root == str(tmp_path / "repo" / "RoboTwin-Vector")
+    assert cfg.wallet_path == str(tmp_path / "repo" / "var" / "wallets")
 
-    with pytest.raises(ConfigError, match="both rounds and epochs"):
-        load(write(tmp_path, both))
+
+def test_a_local_chain_counts_more_blocks(tmp_path):
+    cfg = load(write(tmp_path, GOOD.replace('"test"', '"ws://127.0.0.1:9944"')))
+    assert cfg.weights_interval_blocks == 100 and cfg.vector.private_window_blocks == 1200
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        (GOOD.replace("policy_python =", "policy_pythonn ="), "does not take policy_pythonn"),
+        (GOOD + 'store = "x"\n', "does not take store"),
+        (GOOD.replace("netuid = 7\n", ""), "needs netuid"),
+        (GOOD.replace('policy_python = "/env/policy/bin/python"\n', ""), "needs policy_python"),
+        ("network = 'test'\nnetuid = 1\n", "a validator runs at least one"),
+        (GOOD + "[lanes.vector]\n", "the file does not take lanes"),
+        (
+            GOOD.replace('hotkey = "hot" }', 'hotkey = "hot", pat = "x" }'),
+            "wallet does not take pat",
+        ),
+    ],
+)
+def test_a_config_this_build_cannot_run_is_refused_by_name(tmp_path, text, message):
+    with pytest.raises(ConfigError, match=message):
+        load(write(tmp_path, text))
+
+
+def test_horizon_keeps_its_rounds_in_the_data_directory(tmp_path):
+    cfg = load(write(tmp_path, GOOD + "\n[horizon]\ngenesis_block = 5\nwindow_blocks = 100\n"))
+    assert cfg.horizon.rounds == tmp_path / "var" / "horizon" / "rounds"
+    assert (cfg.horizon.genesis_block, cfg.horizon.window_blocks, cfg.horizon.share) == (
+        5,
+        100,
+        0.0,
+    )
+    assert cfg.shares == {"vector": 0.30, "horizon": 0.0}
+
+
+def test_the_repositorys_configs_load():
+    root = Path(__file__).resolve().parents[1] / "config"
+    for name in ("testnet.toml", "localnet.toml"):
+        cfg = load(root / name)
+        assert cfg.vector.simulator_root and cfg.data == root.parent / "var" / name[: -len(".toml")]

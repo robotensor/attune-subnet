@@ -1,54 +1,18 @@
 # The localnet rehearsal: scripts/localnet.sh up, then scripts/localnet_setup.py (writes netuid).
-[paths]
-# Everything relative below hangs from here: the repository root, since this file is in config/.
-root = ".."
-
-[chain]
+# Data is kept in var/localnet/.
 network = "ws://127.0.0.1:9944"
 netuid = 2
+wallet = { name = "owner", hotkey = "default", path = "var/wallets" }
 
-[validator]
-wallet_name = "owner"
-wallet_hotkey = "default"
-wallet_path = "var/wallets"
-state = "var/localnet/validator-state"
-# Fast blocks (250 ms): a weights interval of 100 blocks is 25 s.
-weights_interval_blocks = 100
-# Empty: the subnet owner's hotkey (uid 0) takes what no lane claims.
-burn_hotkey = ""
-# Horizon's 70% is not wired in yet, so it burns. Said out loud, because a share that does not add
-# up is otherwise a typo that burns emission quietly.
-burn_remainder = true
-
-[lanes.vector]
-share = 0.30
-spec = "/root/robotensor/vector/vector-orchestrator/specs/vector_level1.json"
-store = "var/localnet/vector/store"
-run_dir = "var/localnet/vector/runs"
-cache = "/root/robotensor/.cache/weights"
+[vector]
 policy_python = "/root/robotensor/.venvs/vector-policy/bin/python"
 simulator_python = "/root/robotensor/.venvs/robotwin-bench/bin/python"
 simulator_root = "/root/robotensor/vector/RoboTwin-Vector"
-# The rehearsal plays 48 units a side (3 per task): enough for the sign test to call a clear win.
-duel_size = "light"
-genesis_revision = ""
-private_window_blocks = 1200
-policy_kwargs = { device = "cuda:0" }
-# Units at once: each is a simulator (~6 GB) and a policy server (~3 GB) on the GPU. Measured on
-# one RTX PRO 6000: 3 at once give 1.5x the throughput of 1, 5 give 1.7x; the CPU and GPU saturate.
-workers = 4
 mirror = "robotensor/vector-results"
 
-[lanes.horizon]
-# Competition 2, wired but not open: its commitments are read and taken in, no round is scored,
-# and it pays nothing. A share above zero must name `serve_as` - a model served as the user
-# running the validator could read the answer key of the episode it is being scored on.
-share = 0.0
-# The schedule is the chain's: the block the first round opened at, and how long each one takes.
-# 100 blocks on the localnet, where blocks are 250 ms.
+[horizon]
+# Wired but not open: commitments are taken in, no round is scored, nothing is paid. Rounds of 100
+# blocks (250 ms each) from block 1.
 genesis_block = 1
 window_blocks = 100
-store = "var/localnet/horizon/store"
-rounds = "var/localnet/horizon/rounds"
-# The engine's own configuration: what a round evaluates, and the forks that run it.
 competition = "/root/robotensor/horizon/horizon-competition/competition.yml"

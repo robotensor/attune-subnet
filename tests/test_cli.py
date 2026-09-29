@@ -89,8 +89,8 @@ def test_the_report_says_there_is_no_submission_fee():
 
 
 def test_init_writes_a_config_that_loads(tmp_path):
-    """The twenty paths around a validator are what makes one fiddly to stand up; `init` writes
-    them, and leaves exactly the two things it cannot know."""
+    """`init` writes a config holding only what differs between hosts, and the directories its data
+    is kept in."""
     from robotensor.config import load
     from robotensor.init import validator
 
@@ -99,9 +99,9 @@ def test_init_writes_a_config_that_loads(tmp_path):
     cfg = load(path)
     assert cfg.root == tmp_path / "node"
     assert cfg.vector.store == tmp_path / "node" / "var" / "vector" / "store"
-    assert cfg.burn_remainder and cfg.shares == {"vector": 0.30}
+    assert cfg.shares == {"vector": 0.30}
     assert (tmp_path / "node" / "var" / "state").is_dir()
-    assert "wallet_name" in path.read_text() and "policy_python" in path.read_text()
+    assert "wallet" in path.read_text() and "policy_python" in path.read_text()
 
 
 def test_init_will_not_write_over_a_config(tmp_path):
@@ -111,27 +111,6 @@ def test_init_will_not_write_over_a_config(tmp_path):
 
     with pytest.raises(FileExistsError):
         validator(tmp_path / "node")
-
-
-def test_a_packaged_contract_is_found_wherever_the_engine_keeps_it():
-    """`spec = "@vector_orchestrator/..."` is what `init` writes: a validator with no checkout
-    beside it reads the contract out of the engine it installed."""
-    pytest.importorskip("vector_orchestrator")
-    from robotensor.config import _packaged
-
-    found = _packaged("@vector_orchestrator/specs/vector_level1.json")
-
-    assert found.is_file() and found.name == "vector_level1.json"
-
-
-def test_a_packaged_contract_that_is_not_there_says_which_package():
-    from robotensor.config import ConfigError, _packaged
-
-    with pytest.raises(ConfigError, match="not installed"):
-        _packaged("@no_such_engine/specs/x.json")
-
-    with pytest.raises(ConfigError, match="ships no"):
-        _packaged("@robotensor/specs/nothing.json")
 
 
 def test_submit_is_one_command_in_the_order_that_keeps_weights_yours():

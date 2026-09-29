@@ -1,9 +1,7 @@
 """`robotensor init`: a working directory, and a config that only needs your wallet filled in.
 
-What is fiddly about running a validator is not the code, it is the twenty paths around it. This
-writes them: a config where everything hangs from the directory it is in, the directories
-themselves, and a contract named as the installed engine ships it rather than as a path into
-somebody else's checkout.
+What is fiddly about running a validator is not the code, it is the paths around it. This writes a
+config holding only what differs between hosts, and the directories its data is kept in.
 
 What it will not do is guess a wallet or a netuid. Those are the two lines it leaves for you, and
 `robotensor doctor` tells you the moment either is wrong.
@@ -16,42 +14,19 @@ from pathlib import Path
 CONFIG = "robotensor.toml"
 
 VALIDATOR_TOML = """\
-# Written by `robotensor init`. Everything relative hangs from this file's own directory.
-[paths]
-root = "."
-
-[chain]
+# Written by `robotensor init`. State, stores and runs are kept in var/ beside this file.
 # `finney` is mainnet, `test` the test network, or a ws:// address of your own.
 network = "{network}"
 netuid = {netuid}
-
-[validator]
 # The wallet this validator sets weights with. `btcli wallet list` shows what you have.
-wallet_name = "{wallet_name}"
-wallet_hotkey = "{wallet_hotkey}"
-state = "var/state"
-weights_interval_blocks = 360
-# Empty: whatever no competition claims goes to the subnet owner's hotkey.
-burn_hotkey = ""
-# Competition 2 (Horizon) is not open yet, so its share of the emission burns. Said out loud,
-# because a share that does not add up should never be a typo nobody noticed.
-burn_remainder = true
+wallet = {{ name = "{wallet_name}", hotkey = "{wallet_hotkey}" }}
 
-[lanes.vector]
-# Robotensor Vector: one demonstration shown as context, the task done in another scene.
-share = 0.30
-# The contract as the installed engine ships it. A path works too, if you run from a checkout.
-spec = "@vector_orchestrator/specs/vector_level1.json"
-store = "var/vector/store"
-run_dir = "var/vector/runs"
-cache = "var/vector/cache"
+[vector]
 # The two environments a duel needs, and the RoboTwin-Vector checkout the simulator runs from; see
 # docs/VALIDATOR.md. `robotensor doctor` checks all three.
 policy_python = "{policy_python}"
 simulator_python = "{simulator_python}"
 simulator_root = "{simulator_root}"
-duel_size = "launch"
-workers = 4
 # A Hugging Face dataset the store is published to; empty to keep it local.
 mirror = ""
 """

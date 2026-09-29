@@ -43,9 +43,11 @@ def lane(cfg: Config, state: State) -> VectorLane:
 
 def compute_weights(cfg: Config, vector: VectorLane, chain: chain_.Chain) -> dict[int, float]:
     uids = chain.uids()
-    burn = cfg.burn_hotkey or chain.owner_hotkey()
+    burn = chain.owner_hotkey()
     if burn not in uids:
-        raise RuntimeError(f"the burn hotkey {burn} is not registered on netuid {cfg.netuid}")
+        raise RuntimeError(
+            f"the subnet owner's hotkey {burn} is not registered on netuid {cfg.netuid}"
+        )
     award = vector.award()
     lanes = [
         weights_.Lane(
@@ -116,8 +118,6 @@ def cmd_duel(args: argparse.Namespace, cfg: Config) -> int:
     state = State(cfg.state)
     vector = lane(cfg, state)
     chain = chain_.Chain(cfg.network, cfg.netuid)
-    if not vector.ready():
-        print(json.dumps(vector.genesis(chain), indent=1, default=str))
     if args.challenger:
         repo, _, revision = args.challenger.partition("@")
         from vector_orchestrator.ids import submission_key
@@ -145,7 +145,7 @@ def cmd_duel(args: argparse.Namespace, cfg: Config) -> int:
             print("nothing queued")
             return 0
         entry = queue[0]
-    result = vector.duel(entry, chain, size=args.size)
+    result = vector.duel(entry, chain)
     print(json.dumps({k: v for k, v in result.items() if k != "units"}, indent=1, default=str))
     return 0
 
@@ -183,14 +183,13 @@ def add_subcommands(sub: Any) -> None:
     sub.add_parser("intake", help="read commitments into the lanes once").set_defaults(
         func=cmd_intake
     )
-    duel = sub.add_parser("duel", help="run one duel now (after genesis if needed)")
+    duel = sub.add_parser("duel", help="run one duel now (a genesis on an empty throne)")
     duel.add_argument(
         "--challenger", default=None, help="owner/name@sha, instead of the queue's next"
     )
     duel.add_argument(
         "--hotkey", default=None, help="the hotkey a manual challenger is credited to"
     )
-    duel.add_argument("--size", default=None, help="the duel size (default: the config's)")
     duel.set_defaults(func=cmd_duel)
     weights = sub.add_parser("weights", help="compute and set weights")
     weights.add_argument("--dry-run", action="store_true", help="print, do not set")

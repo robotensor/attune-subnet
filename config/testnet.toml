@@ -1,42 +1,11 @@
-# Testnet: set netuid to the subnet you registered (btcli subnet create --network test), and the
-# wallet to its owner's (or a validator with a permit). Wallets live where btcli keeps them.
-[paths]
-# Everything relative below hangs from here: the repository root, since this file is in config/.
-root = ".."
-
-[chain]
+# Testnet: the netuid of the subnet you registered (btcli subnet create --network test), and its
+# owner's wallet (or a validator's with a permit). Data is kept in var/testnet/.
 network = "test"
 netuid = 0
+wallet = { name = "robotensor-owner", hotkey = "default" }
 
-[validator]
-wallet_name = "robotensor-owner"
-wallet_hotkey = "default"
-wallet_path = ""
-state = "var/testnet/validator-state"
-# 12 s blocks: 360 blocks is one tempo, 72 minutes; the chain's weights rate limit is 100.
-weights_interval_blocks = 360
-# Empty: the subnet owner's hotkey (uid 0) takes what no lane claims.
-burn_hotkey = ""
-# Horizon's 70% is not wired in yet, so it burns. Said out loud, because a share that does not add
-# up is otherwise a typo that burns emission quietly.
-burn_remainder = true
-
-[lanes.vector]
-share = 0.30
-spec = "/root/robotensor/vector/vector-orchestrator/specs/vector_level1.json"
-store = "var/testnet/vector/store"
-run_dir = "var/testnet/vector/runs"
-cache = "/root/robotensor/.cache/weights"
+[vector]
 policy_python = "/root/robotensor/.venvs/vector-policy/bin/python"
 simulator_python = "/root/robotensor/.venvs/robotwin-bench/bin/python"
 simulator_root = "/root/robotensor/vector/RoboTwin-Vector"
-# The launch size: 160 units a side, 10 per task (the spec's default).
-duel_size = "launch"
-genesis_revision = ""
-private_window_blocks = 300
-policy_kwargs = { device = "cuda:0" }
-# Units at once: each is a simulator (~6 GB) and a policy server (~3 GB) on the GPU. Measured on
-# one RTX PRO 6000: 3 at once give 1.5x the throughput of 1, 5 give 1.7x; the CPU and GPU saturate.
-workers = 4
-# A Hugging Face dataset the store is published to, for the dashboard; empty for none.
 mirror = "robotensor/vector-results"

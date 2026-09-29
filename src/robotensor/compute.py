@@ -6,7 +6,7 @@ processes of their own; this decides what each one's says.
 
 Two boxes, one rule:
 
-- **Cards named per lane** (`[lanes.<name>].devices`): each competition has its own, nothing is
+- **Cards named per lane** (`[<name>].devices`): each competition has its own, nothing is
   shared, and a lease is free - no waiting, no lock.
 - **Nothing named**: the box has one pool and a lane takes all of it for the length of one step,
   under a lock beside the state. Vector at `workers = 4` is about 36 GB and one Horizon episode

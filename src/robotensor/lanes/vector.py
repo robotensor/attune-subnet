@@ -81,7 +81,6 @@ class VectorLane:
         # Where the orchestrator's RoboTwin driver finds the checkout it runs, and its interpreter.
         os.environ["ROBOTWIN_BENCH_ROOT"] = self.cfg.simulator_root
         os.environ["ROBOTWIN_BENCH_PYTHON"] = self.cfg.simulator_python
-        from vector_orchestrator.canon import Signer
         from vector_orchestrator.duel.orchestrate import Orchestrator
         from vector_orchestrator.duel.weights_runtime import WeightsPolicyRuntime
         from vector_orchestrator.spec import load_spec
@@ -90,20 +89,10 @@ class VectorLane:
         spec = load_spec(self.cfg.spec)
         if TRACK not in spec.tracks:
             raise ValueError(f"{self.cfg.spec} declares no track {TRACK}")
-        self.cfg.key.parent.mkdir(parents=True, exist_ok=True)
-        if self.cfg.key.exists():
-            signer = Signer.from_file(self.cfg.key)
-        else:
-            signer = Signer.generate()
-            signer.save(self.cfg.key)
-            log.warning("generated the store's signing key at %s", self.cfg.key)
-        store = Store(self.cfg.store, spec, signer)
-        manifest = store.manifest()
-        if manifest is None:
+        store = Store(self.cfg.store, spec)
+        if store.manifest() is None:
             with store_lock(store.root):
-                store.init(signer.verify_key_hex)
-        elif manifest.get("validator_key") != signer.verify_key_hex:
-            raise ValueError(f"{self.cfg.store} is signed by another key than {self.cfg.key}")
+                store.init()
         runtime = WeightsPolicyRuntime(
             spec,
             python=self.cfg.policy_python,

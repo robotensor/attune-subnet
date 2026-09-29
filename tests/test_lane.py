@@ -52,7 +52,6 @@ def lane(tmp_path):
         share=0.3,
         spec=SPEC,
         store=tmp_path / "store",
-        key=tmp_path / "keys" / "k.ed25519",
         run_dir=tmp_path / "runs",
         cache=tmp_path / "cache",
         policy_python="python",

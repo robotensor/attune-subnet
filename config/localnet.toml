@@ -24,7 +24,6 @@ burn_remainder = true
 share = 0.30
 spec = "/root/robotensor/vector/vector-orchestrator/specs/vector_level1.json"
 store = "var/localnet/vector/store"
-key = "var/localnet/vector-keys/orchestrator.ed25519"
 run_dir = "var/localnet/vector/runs"
 cache = "/root/robotensor/.cache/weights"
 policy_python = "/root/robotensor/.venvs/vector-policy/bin/python"

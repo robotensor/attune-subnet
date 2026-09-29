@@ -51,11 +51,10 @@ class LaneConfig:
 
 @dataclass(frozen=True)
 class VectorConfig(LaneConfig):
-    """Robotensor Vector: the orchestrator contract, and where its signed store and runs live."""
+    """Robotensor Vector: the orchestrator contract, and where its store and runs live."""
 
     spec: Path = Path()
     store: Path = Path()
-    key: Path = Path()
     run_dir: Path = Path()
     cache: Path = Path()
     policy_python: str = ""
@@ -68,7 +67,7 @@ class VectorConfig(LaneConfig):
     #: How long a commitment whose repository the Hub will not show yet (still private) waits.
     private_window_blocks: int = 300
     policy_kwargs: dict[str, str] = field(default_factory=dict)
-    #: A Hugging Face dataset the signed store is mirrored to; empty for none.
+    #: A Hugging Face dataset the store is mirrored to; empty for none.
     mirror: str = ""
     #: Units materialized and played at once, each a simulator and a policy server of its own
     #: (about 9 GB of GPU memory each).
@@ -233,7 +232,6 @@ def _vector(name: str, table: dict[str, Any], base: Path, path: Path) -> VectorC
         share=float(table.get("share", 0.30)),
         spec=_path(base, table["spec"]),
         store=_path(base, table.get("store", "var/vector/store")),
-        key=_path(base, table.get("key", "var/vector/keys/orchestrator.ed25519")),
         run_dir=_path(base, table.get("run_dir", "var/vector/runs")),
         cache=_path(base, table.get("cache", "var/vector/cache")),
         policy_python=os.path.expandvars(str(table["policy_python"])),

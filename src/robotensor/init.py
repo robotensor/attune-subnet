@@ -43,7 +43,6 @@ share = 0.30
 # The contract as the installed engine ships it. A path works too, if you run from a checkout.
 spec = "@vector_orchestrator/specs/vector_level1.json"
 store = "var/vector/store"
-key = "var/vector/keys/orchestrator.ed25519"
 run_dir = "var/vector/runs"
 cache = "var/vector/cache"
 # The two environments a duel needs, and the RoboTwin-Vector checkout the simulator runs from; see
@@ -53,7 +52,7 @@ simulator_python = "{simulator_python}"
 simulator_root = "{simulator_root}"
 duel_size = "launch"
 workers = 4
-# A Hugging Face dataset the signed store is published to; empty to keep it local.
+# A Hugging Face dataset the store is published to; empty to keep it local.
 mirror = ""
 """
 

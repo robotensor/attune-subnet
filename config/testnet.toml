@@ -25,7 +25,6 @@ burn_remainder = true
 share = 0.30
 spec = "/root/robotensor/vector/vector-orchestrator/specs/vector_level1.json"
 store = "var/testnet/vector/store"
-key = "var/testnet/vector-keys/orchestrator.ed25519"
 run_dir = "var/testnet/vector/runs"
 cache = "/root/robotensor/.cache/weights"
 policy_python = "/root/robotensor/.venvs/vector-policy/bin/python"
@@ -39,5 +38,5 @@ policy_kwargs = { device = "cuda:0" }
 # Units at once: each is a simulator (~6 GB) and a policy server (~3 GB) on the GPU. Measured on
 # one RTX PRO 6000: 3 at once give 1.5x the throughput of 1, 5 give 1.7x; the CPU and GPU saturate.
 workers = 4
-# A Hugging Face dataset the signed store is published to, for the dashboard; empty for none.
+# A Hugging Face dataset the store is published to, for the dashboard; empty for none.
 mirror = "robotensor/vector-results"

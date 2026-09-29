@@ -9,8 +9,9 @@ Two boxes, one rule:
 - **Cards named per lane** (`[<name>].devices`): each competition has its own, nothing is
   shared, and a lease is free - no waiting, no lock.
 - **Nothing named**: the box has one pool and a lane takes all of it for the length of one step,
-  under a lock beside the state. Vector at `workers = 4` is about 36 GB and one Horizon episode
-  wants 80; overlapping them on one card means both fail slowly rather than one finishing.
+  under a lock beside the state. One Vector unit alone took up to 34 GB and one Horizon episode
+  wants 80; overlapping them on one card means both fail slowly rather than one finishing. Vector
+  spreads its units over every card of its lease, `workers` on each.
 
 A lease is held for one step, never longer, so a competition that runs for hours between steps
 cannot starve the other for days.

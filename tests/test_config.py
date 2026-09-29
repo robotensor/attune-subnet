@@ -39,7 +39,7 @@ def test_a_host_config_loads_and_the_rest_is_fixed(tmp_path):
     vector = cfg.vector
     assert vector.simulator_root == "/checkout/RoboTwin-Vector" and vector.mirror == ""
     assert (vector.workers, vector.policy_kwargs, vector.private_window_blocks) == (
-        4,
+        1,
         {"device": "cuda:0"},
         300,
     )
@@ -65,6 +65,10 @@ def test_relative_paths_hang_from_the_root(tmp_path):
     assert cfg.wallet_path == str(tmp_path / "repo" / "var" / "wallets")
 
 
+def test_a_host_sets_how_many_units_each_of_its_gpus_runs(tmp_path):
+    assert load(write(tmp_path, GOOD + "workers = 3\n")).vector.workers == 3
+
+
 def test_a_local_chain_counts_more_blocks(tmp_path):
     cfg = load(write(tmp_path, GOOD.replace('"test"', '"ws://127.0.0.1:9944"')))
     assert cfg.weights_interval_blocks == 100 and cfg.vector.private_window_blocks == 1200
@@ -75,6 +79,8 @@ def test_a_local_chain_counts_more_blocks(tmp_path):
     [
         (GOOD.replace("policy_python =", "policy_pythonn ="), "does not take policy_pythonn"),
         (GOOD + 'store = "x"\n', "does not take store"),
+        (GOOD + "workers = 0\n", "workers must be a whole number"),
+        (GOOD + "workers = 1.5\n", "workers must be a whole number"),
         (GOOD.replace("netuid = 7\n", ""), "needs netuid"),
         (GOOD.replace('policy_python = "/env/policy/bin/python"\n', ""), "needs policy_python"),
         ("network = 'test'\nnetuid = 1\n", "a validator runs at least one"),

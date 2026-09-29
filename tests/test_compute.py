@@ -37,8 +37,8 @@ def _hold(root, seconds, started):
 
 
 def test_two_lanes_sharing_a_box_do_not_overlap(tmp_path):
-    """Vector at four workers is about 36 GB and one Horizon episode wants 80: on one card they
-    must take turns, or both fail slowly instead of one finishing."""
+    """A Vector unit takes up to 34 GB and one Horizon episode wants 80: on one card they must
+    take turns, or both fail slowly instead of one finishing."""
     with mp.Manager() as manager:
         started = manager.Value("i", 0)
         first = mp.Process(target=_hold, args=(str(tmp_path), 0.6, started))

@@ -9,12 +9,13 @@
     simulator_python = "/abs/simulator-env/bin/python"
     simulator_root = "/abs/RoboTwin-Vector"
     mirror = "owner/vector-results"      # optional: the dataset the store is published to
+    workers = 1                          # optional: units at once on each GPU, for its memory
 
     [horizon]                            # runs Robotensor Horizon; see HorizonConfig
 
 Only what differs between hosts is here. Everything else is fixed in code: each competition's share
 of the emission, the data directory (`var/<config name>/` beside `config/`, or `var/` beside a
-config elsewhere), the weights interval and private window (per network), the workers and device.
+config elsewhere), the weights interval and private window (per network) and the device.
 A key this build does not know is refused, with its name.
 """
 
@@ -59,12 +60,13 @@ class VectorConfig(LaneConfig):
     cache: Path = Path()
     #: How long a commitment whose repository the Hub will not show yet (still private) waits.
     private_window_blocks: int = 300
-    #: Units played at once, each a simulator and a policy server (about 9 GB of GPU memory).
-    workers: int = 4
+    #: Units run at once on each GPU of the lane's lease, each a simulator and a policy server:
+    #: as many as one card's memory holds (one unit alone took up to 34 GB on 2026-09-29).
+    workers: int = 1
     policy_kwargs: dict[str, str] = field(default_factory=lambda: {"device": "cuda:0"})
 
 
-VECTOR_KEYS = ("policy_python", "simulator_python", "simulator_root", "mirror")
+VECTOR_KEYS = ("policy_python", "simulator_python", "simulator_root", "mirror", "workers")
 
 
 @dataclass(frozen=True)
@@ -165,6 +167,9 @@ def _vector(
     for required in ("policy_python", "simulator_python", "simulator_root"):
         if not table.get(required):
             raise ConfigError(f"{path}: [vector] needs {required}")
+    workers = table.get("workers", 1)
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
+        raise ConfigError(f"{path}: [vector] workers must be a whole number of at least 1")
     return VectorConfig(
         name="vector",
         share=SHARES["vector"],
@@ -172,6 +177,7 @@ def _vector(
         simulator_python=os.path.expandvars(str(table["simulator_python"])),
         simulator_root=str(_path(root, table["simulator_root"])),
         mirror=str(table.get("mirror", "")),
+        workers=workers,
         store=data / "vector" / "store",
         run_dir=data / "vector" / "runs",
         cache=data / "vector" / "cache",

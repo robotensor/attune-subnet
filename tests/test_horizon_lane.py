@@ -66,7 +66,6 @@ def lane(tmp_path):
         window_blocks=100,
         store=tmp_path / "store",
         rounds=tmp_path / "rounds",
-        key=tmp_path / "keys" / "k.ed25519",
         private_window_blocks=10,
     )
     return HorizonLane(cfg, State(tmp_path / "state"))
@@ -340,7 +339,7 @@ def entered(lane):
     return submissions.key_for("m/one", A)
 
 
-def test_the_winner_is_read_back_from_the_signed_record(lane, tmp_path, monkeypatch):
+def test_the_winner_is_read_back_from_the_published_record(lane, tmp_path, monkeypatch):
     """Never from what this validator thought was happening: the record is the thing every other
     reader can check."""
     key = entered(lane)

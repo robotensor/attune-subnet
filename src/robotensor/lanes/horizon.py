@@ -1,7 +1,7 @@
 """Robotensor Horizon: chain commitments in, weekly rounds out, through its engine.
 
 This module is the chain's side of Competition 2 and nothing else. The engine is
-`horizon_competition` (the pool, the evaluation, the scoring and the signed store) and the model
+`horizon_competition` (the pool, the evaluation, the scoring and the store) and the model
 runtime is `horizon_runtime_zerowam`; what lives here is the part only the chain can answer.
 
 **Intake.** Every `horizon:` commitment is read with the block it was made at, and belongs to the
@@ -299,7 +299,6 @@ class HorizonLane:
             python=self.cfg.engine_python or sys.executable,
             config=self.cfg.competition,
             store=self.cfg.store,
-            keys=self.cfg.key.parent,
             rounds=self.cfg.rounds,
             models=self.cfg.models,
             runtime_python=self.cfg.runtime_python,
@@ -323,7 +322,7 @@ class HorizonLane:
         after = None
         if verb == "open":
             if not engine.store_ready:
-                log.info("horizon: making the signed store at %s", engine.store)
+                log.info("horizon: making the store at %s", engine.store)
                 made = subprocess.run(engine.store_argv(), check=False)
                 if made.returncode != 0:
                     return Progress(LANE, FAILED, f"store init exited {made.returncode}")
@@ -357,7 +356,7 @@ class HorizonLane:
 
     @staticmethod
     def _closed(engine: rounds_.Engine, name: str) -> dict[str, Any] | None:
-        """Round `name`'s signed close record, under whichever name it was published; None, and
+        """Round `name`'s close record, under whichever name it was published; None, and
         said, when there is none to read or it is another round's."""
         from horizon_competition import store as store_
 
@@ -383,7 +382,7 @@ class HorizonLane:
     def _won(self, engine: rounds_.Engine, window: schedule_.Window, name: str) -> None:
         """Read who the closed round ranked first, and note the hotkey that committed them.
 
-        The winner is read back from the signed record, never from what this validator thought was
+        The winner is read back from the published record, never from what this validator thought was
         happening while the round ran: the record is the thing every other reader can check, and a
         weight vector built from anything else could not be checked at all. A dry run publishes no
         record and pays nobody, which is what makes it a rehearsal.
@@ -430,7 +429,6 @@ class HorizonLane:
             submissions.add(
                 engine.store,
                 store_dir=engine.store,
-                key_dir=engine.keys,
                 participant=entry.hotkey,
                 repo=entry.repo,
                 revision=entry.revision,

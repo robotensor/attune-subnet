@@ -79,7 +79,7 @@ VECTOR_KEYS = tuple(f.name for f in VectorConfig.__dataclass_fields__.values() i
 
 @dataclass(frozen=True)
 class HorizonConfig(LaneConfig):
-    """Robotensor Horizon: the round schedule, and where its signed store and runs live.
+    """Robotensor Horizon: the round schedule, and where its store and runs live.
 
     The schedule is in blocks because it is the chain's: `genesis_block` and `window_blocks` are
     all two validators need to agree on which round is open (`protocol.schedule`).
@@ -91,7 +91,6 @@ class HorizonConfig(LaneConfig):
     store: Path = Path()
     #: Where each round's directory is made: `<rounds>/<id>`.
     rounds: Path = Path()
-    key: Path = Path()
     #: The engine's own configuration, which says what a round evaluates.
     competition: Path | None = None
     #: An interpreter for the engine, when it cannot share this one.
@@ -100,7 +99,7 @@ class HorizonConfig(LaneConfig):
     #: running as root could read `pool/<unit>/private/expert.npz` - the answer key for the very
     #: episode it is being scored on - so a lane that pays anything must name one.
     serve_as: str = ""
-    #: A Hugging Face dataset the signed store is mirrored to; empty for none.
+    #: A Hugging Face dataset the store is mirrored to; empty for none.
     mirror: str = ""
     #: The cards this competition may use, when the box is shared with the other one.
     devices: tuple[int, ...] = ()
@@ -264,7 +263,6 @@ def _horizon(name: str, table: dict[str, Any], base: Path, path: Path) -> Horizo
         window_blocks=int(table.get("window_blocks", 50400)),
         store=_path(base, table.get("store", "var/horizon/store")),
         rounds=_path(base, table.get("rounds", "var/horizon/rounds")),
-        key=_path(base, table.get("key", "var/horizon/keys/horizon.ed25519")),
         competition=_path(base, table["competition"]) if table.get("competition") else None,
         engine_python=os.path.expandvars(str(table.get("engine_python", ""))),
         serve_as=serve_as,

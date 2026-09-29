@@ -1,7 +1,7 @@
 """Robotensor Vector: chain commitments in, king-of-the-hill duels out, through its orchestrator.
 
 This module is the chain's side of the lane and nothing else. The lane engine is
-`vector_orchestrator` (duels, the weights runtime, the signed store), run as a library on the
+`vector_orchestrator` (duels, the weights runtime, the store), run as a library on the
 `vector_level1` contract (`specs/vector_level1.json` in the orchestrator); the benchmark is the RoboTwin-Vector fork's
 plugin; the model code is `vector_runtime`. What happens here:
 
@@ -16,10 +16,10 @@ one commitment per hotkey.
 **Duels.** The queue is served oldest commitment first. Before the first duel the track's declared
 baseline (`robotensor/vector-base`) takes the empty throne by genesis. Each
 duel is seeded from a block after the challenger's commitment (`protocol.seed`) and run by
-`Orchestrator.run`, which publishes a signed record: the crown moves only when the challenger beats
+`Orchestrator.run`, which publishes a record: the crown moves only when the challenger beats
 the king by the margin and the paired sign test says it is no accident.
 
-**Champions.** The lane's champions are read back from the signed store: every record that crowned a
+**Champions.** The lane's champions are read back from the store: every record that crowned a
 model, newest first, each mapped to the hotkey that committed it (the baseline maps to none).
 """
 
@@ -348,7 +348,7 @@ class VectorLane:
 
     def champions(self) -> list[str | None]:
         """Every model this lane crowned, newest first, as the hotkey that committed it; None for
-        the genesis baseline. Read from the signed store's index."""
+        the genesis baseline. Read from the store's index."""
         from vector_orchestrator.ids import submission_key
 
         entries = self.state.lane(LANE)["entries"]

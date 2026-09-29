@@ -1,6 +1,6 @@
 """What the validator remembers between runs: one JSON document per competition, in a directory.
 
-Everything is keyed by hotkey or by submission key, never by UID (UIDs are recycled). The signed
+Everything is keyed by hotkey or by submission key, never by UID (UIDs are recycled). The
 store a lane engine publishes is the record of what was decided; these documents only remember
 what the chain does not keep (a commitment is overwritten by the next one) and what the store does
 not name (which hotkey committed a submission).

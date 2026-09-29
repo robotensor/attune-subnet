@@ -84,7 +84,6 @@ def engine(tmp_path):
         python="/usr/bin/python3",
         config=tmp_path / "competition.yml",
         store=tmp_path / "store",
-        keys=tmp_path / "keys",
         rounds=tmp_path / "rounds",
         models=tmp_path / "models",
         runtime_python="/opt/runtime/bin/python",
@@ -93,12 +92,14 @@ def engine(tmp_path):
     )
 
 
-def test_open_names_the_store_the_keys_and_the_register(engine):
+def test_open_names_the_store_and_the_register(engine):
     argv = engine.argv("open", "2026-W39", profile="smoke")
 
     assert argv[:5] == ["/usr/bin/python3", "-m", "horizon_competition.cli", "round", "open"]
     assert "--profile" in argv and argv[argv.index("--profile") + 1] == "smoke"
-    assert str(engine.store) in argv and str(engine.keys) in argv
+    assert argv[argv.index("--store") + 1] == str(engine.store)
+    assert argv[argv.index("--register") + 1] == str(engine.store)
+    assert "--keys" not in argv
 
 
 def test_open_after_the_previous_round_starts_where_that_one_closed(engine):
@@ -144,12 +145,12 @@ def test_every_verb_is_the_engines_round_command_on_the_rounds_directory(engine,
 
 @pytest.mark.parametrize("stage", ["screen", "full"])
 def test_each_drain_publishes_a_models_result_as_soon_as_it_finishes(engine, stage):
-    """Live, and signed into the round's own store with the round's own key."""
+    """Live: each result goes into the round's store as soon as it is ready."""
     argv = engine.argv(stage, "e00007")
 
     assert argv[3:5] == ["round", "drain"]
     assert argv[argv.index("--store") + 1] == str(engine.store)
-    assert argv[argv.index("--keys") + 1] == str(engine.keys)
+    assert "--keys" not in argv
 
 
 @pytest.mark.parametrize("stage", ["screen", "full"])

@@ -50,6 +50,5 @@ genesis_block = 1
 window_blocks = 100
 store = "var/localnet/horizon/store"
 rounds = "var/localnet/horizon/rounds"
-key = "var/localnet/horizon-keys/horizon.ed25519"
 # The engine's own configuration: what a round evaluates, and the forks that run it.
 competition = "/root/robotensor/horizon/horizon-competition/competition.yml"

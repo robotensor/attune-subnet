@@ -5,36 +5,36 @@ build-backend = "hatchling.build"
 [project]
 name = "robotensor"
 version = "0.2.0"
-description = "Mine the Robotensor Bittensor subnet: build a submission, check it as the validator will, and commit it on chain."
+description = "Miner and validator tooling for the Robotensor Bittensor subnet."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
-# bittensor 10.x: version 11 replaced the SDK's API (see chain.py). It is here because a miner
-# commits on chain. huggingface_hub uploads the submission and reads it back.
+keywords = ["bittensor", "robotics", "robot-learning", "simulation"]
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+# bittensor 11 changed the SDK API (see chain.py).
 dependencies = ["bittensor==10.5.0", "huggingface_hub>=1.0"]
 
 [project.optional-dependencies]
-# The index is the miner's path. Each extra is what that competition's miner needs to build a
-# submission and check it the way the validator will: the model runtime, and nothing else.
-#
-# A validator is not installed from here. Its engine runs a benchmark fork of gigabytes that
-# nothing imports, beside two Python environments with different pinned stacks, so it is a set of
-# checkouts and `docs/VALIDATOR.md` is the way in.
 vector = ["robotensor-vector-runtime>=0.2"]
-horizon = ["robotensor-horizon-runtime-zerowam>=0.2"]
 dev = ["pytest>=8", "ruff==0.16.7"]
+
+[project.urls]
+Repository = "https://github.com/robotensor/robotensor-subnet"
 
 [project.scripts]
 robotensor = "robotensor.cli:main"
-# The names the two halves had before there was one command. They stay through 0.2, so a running
-# validator's unit file and a miner's notes keep working.
+# Pre-0.2 entry points, kept so existing unit files keep working.
 robotensor-miner = "robotensor.miner:main"
 robotensor-validator = "robotensor.validator:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/robotensor"]
-# The name the package had before it was something you install from an index, so a script that
-# still imports it says so rather than failing.
+# Old import name, kept as a shim.
 force-include = { "src/robotensor_subnet.py" = "robotensor_subnet.py" }
 
 [tool.ruff]

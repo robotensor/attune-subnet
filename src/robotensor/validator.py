@@ -49,11 +49,7 @@ def compute_weights(cfg: Config, vector: VectorLane, chain: chain_.Chain) -> dic
             f"the subnet owner's hotkey {burn} is not registered on netuid {cfg.netuid}"
         )
     award = vector.award()
-    lanes = [
-        weights_.Lane(
-            vector.name, cfg.vector.share, award.entries, entries=award.keep, decay=award.decay
-        )
-    ]
+    lanes = [weights_.Lane(vector.name, cfg.vector.share, award.entries, split=award.split)]
     return weights_.weight_vector(lanes, uids, uids[burn])
 
 

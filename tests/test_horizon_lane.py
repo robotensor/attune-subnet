@@ -160,7 +160,7 @@ def test_the_first_round_has_nothing_before_it(lane):
 def test_with_no_closed_round_there_is_nobody_to_pay(lane):
     award = lane.award()
 
-    assert list(award.entries) == [] and award.keep == 1 and award.decay == 0.0
+    assert list(award.entries) == [] and tuple(award.split) == (1.0,)
 
 
 def test_a_share_above_zero_without_serve_as_is_refused(tmp_path, monkeypatch):
@@ -340,7 +340,7 @@ def test_the_winner_is_read_back_from_the_published_record(lane, tmp_path, monke
 
     assert winners == [{"round": 1, "key": key, "hotkey": "hk1"}]
     award = lane.award()
-    assert list(award.entries) == ["hk1"] and award.keep == 1 and award.decay == 0.0
+    assert list(award.entries) == ["hk1"] and tuple(award.split) == (1.0,)
 
 
 def test_a_round_closed_before_the_rename_is_read_from_its_epoch_record(

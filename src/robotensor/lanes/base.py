@@ -25,7 +25,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-from ..protocol.weights import CHAMPIONS
+from ..protocol.weights import CHAMPION_SPLIT
 
 #: A step did work that moved the competition on: a duel published, a round verb finished.
 WORKED = "worked"
@@ -69,14 +69,12 @@ class Award:
     """Who a lane says should be paid, newest first, and how its cadence spreads the share.
 
     `entries` are hotkeys; `None` is an entry that belongs to no miner (the organizer's genesis
-    baseline), which is skipped rather than paid. `keep` and `decay` are the knobs of
-    `protocol.weights`: five entries paid equally is Vector's pool, one entry is Horizon's
-    winner-takes-all.
+    baseline), which is skipped rather than paid. `split` is the knob of `protocol.weights`:
+    40/30/20/10 over four entries is Vector's pool, `(1.0,)` is Horizon's winner-takes-all.
     """
 
     entries: Sequence[str | None] = field(default_factory=list)
-    keep: int = CHAMPIONS
-    decay: float = 1.0
+    split: Sequence[float] = CHAMPION_SPLIT
 
 
 @runtime_checkable

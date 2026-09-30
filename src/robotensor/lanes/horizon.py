@@ -444,7 +444,7 @@ class HorizonLane:
         """
         lane = self.state.lane(LANE)
         winners = lane.get("winners") or []
-        return Award([w.get("hotkey") for w in reversed(winners)], keep=1, decay=0.0)
+        return Award([w.get("hotkey") for w in reversed(winners)], split=(1.0,))
 
     def snapshot(self) -> dict[str, Any]:
         lane = self.state.lane(LANE)

@@ -315,7 +315,7 @@ class VectorLane:
         self.engine.push_touched()
 
     def award(self) -> Award:
-        """The champion pool of the subnet spec: the five newest crowned models, paid equally."""
+        """The champion pool of the subnet spec: the four newest crowned models, 40/30/20/10."""
         return Award(self.champions())
 
     def snapshot(self) -> dict[str, Any]:

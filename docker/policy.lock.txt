@@ -1,5 +1,5 @@
 # uv pip freeze --exclude-editable of .venvs/vector-policy, the env that passed the end-to-end duel of 2026-09-29.
-# The image installs exactly these; refresh by freezing an env that passes again (docker/README.md).
+# The image installs exactly these; refresh by freezing an env that passes again (see the README).
 anyio==4.15.1
 certifi==2026.7.22
 charset-normalizer==3.5.1

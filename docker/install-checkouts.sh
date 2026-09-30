@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the image's checkouts into its environments, as docs/VALIDATOR.md does. The image's build
+# Install the image's checkouts into its environments, as a hand-built host does. The image's build
 # runs it, and pod-init again after ROBOTENSOR_PULL=1 has pulled them. Each environment already
 # holds the versions of its lock file, so this adds the checkouts themselves, and anything they
 # have come to need since the lock was frozen.

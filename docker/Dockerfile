@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1.7
-# A validator host in one image: the three environments of docs/VALIDATOR.md, RoboTwin's assets and
-# the three checkouts, so that a rented GPU pod (vast.ai, lium.io) is ready when it starts instead
-# of an hour of installs and downloads later. See docker/README.md.
+# A validator host in one image: the simulator, policy and host environments, RoboTwin's assets
+# and the three checkouts, so that a rented GPU pod (vast.ai, lium.io) is ready when it starts
+# instead of an hour of installs and downloads later.
 #
 # Built by docker/build.sh, which stages the checkouts side by side as the build context:
 #
 #   RoboTwin-Vector/   vector-orchestrator/   robotensor-subnet/
 #
-# Everything lives under /opt, laid out as docs/VALIDATOR.md lays out /root/robotensor, and
+# Everything lives under /opt, laid out as a hand-built host lays out /root/robotensor, and
 # /root/robotensor and /root/miniforge3 are links to it: lium mounts the pod's volume over /root,
 # which would hide anything the image put there, and pod-init puts the links back.
 
@@ -22,8 +22,8 @@ ARG CUDA_ARCH="8.0;8.6;8.9;9.0;10.0;12.0+PTX"
 FROM ubuntu:${UBUNTU_VERSION} AS base
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
-# libegl1 and libvulkan1: SAPIEN renders through the NVIDIA Vulkan driver (docs/install.md,
-# Rendering); libgl1 and the X libraries: opencv-python and open3d link them.
+# libegl1 and libvulkan1: SAPIEN renders through the NVIDIA Vulkan driver; libgl1 and the X
+# libraries: opencv-python and open3d link them.
 RUN apt-get update && apt-get install -y -q --no-install-recommends \
         ca-certificates curl git unzip bzip2 python3 \
         libegl1 libvulkan1 libgl1 libglib2.0-0t64 libgomp1 libsm6 libxext6 libxrender1 libx11-6 libxfixes3 \

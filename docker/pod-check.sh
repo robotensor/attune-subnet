@@ -25,14 +25,14 @@ fi
 if ldconfig -p | grep -q 'libGLX_nvidia\.so\.0' && ldconfig -p | grep -q 'libEGL_nvidia\.so\.0'; then
     report ok "graphics libraries" "libGLX_nvidia, libEGL_nvidia"
 else
-    report FAIL "graphics libraries" "the driver's Vulkan/EGL libraries were not mounted: the container needs NVIDIA_DRIVER_CAPABILITIES=all (the image sets it), and a host whose container toolkit allows graphics (docker/README.md)"
+    report FAIL "graphics libraries" "the driver's Vulkan/EGL libraries were not mounted: the container needs NVIDIA_DRIVER_CAPABILITIES=all (the image sets it), and a host whose container toolkit allows graphics (--runtime=nvidia, or graphics in nvidia-container-runtime/config.toml)"
 fi
 
 shm_gb=$(( $(df -k --output=size /dev/shm | tail -n 1) / 1024 / 1024 ))
 if (( shm_gb >= 1 )); then report ok "/dev/shm" "${shm_gb} GB"; else report warn "/dev/shm" "under 1 GB: start the container with --shm-size=16g or --ipc=host"; fi
 
 out="$(cd "${RT}" && "${SIM}" scripts/test_render.py 2>&1)"
-if grep -q "Render Well" <<<"${out}"; then report ok render "SAPIEN renders"; else report FAIL render "$(last "${out}") (docs/install.md, Troubleshooting)"; fi
+if grep -q "Render Well" <<<"${out}"; then report ok render "SAPIEN renders"; else report FAIL render "$(last "${out}") (check the NVIDIA Vulkan driver)"; fi
 
 # torch first, as CuRobo imports it: the kernels link libc10 and friends from torch's own lib/.
 out="$("${SIM}" -c 'import torch; from curobo.curobolib import kinematics_fused_cu, geom_cu, lbfgs_step_cu, line_search_cu, tensor_step_cu' 2>&1)"

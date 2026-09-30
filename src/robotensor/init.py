@@ -23,7 +23,7 @@ wallet = {{ name = "{wallet_name}", hotkey = "{wallet_hotkey}" }}
 
 [vector]
 # The two environments a duel needs, and the RoboTwin-Vector checkout the simulator runs from; see
-# docs/VALIDATOR.md. `robotensor doctor` checks all three.
+# the README. `robotensor doctor` checks all three.
 policy_python = "{policy_python}"
 simulator_python = "{simulator_python}"
 simulator_root = "{simulator_root}"

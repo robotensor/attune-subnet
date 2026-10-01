@@ -262,3 +262,78 @@ def test_a_seed_block_that_is_not_final_yet_is_waiting_not_a_failure(lane, monke
     progress = lane.step(chain=None)
 
     assert progress.outcome == WAITING and "3 blocks to go" in progress.detail
+
+
+def test_the_queue_names_each_entrys_hotkey(lane):
+    lane.intake(
+        [c("hk1", "m/one", A, 10)], 30, api=FakeHub({f"m/one@{A}": {"model.safetensors": "w1"}})
+    )
+    lane.publish_queue(lane.queue())
+    (entry,) = json.loads(lane.engine.store.queue_path().read_text())["entries"]
+    assert (entry["repo"], entry["hotkey"], entry["block"]) == ("m/one", "hk1", 10)
+
+
+def test_the_champions_paid_now_are_published_with_their_part_of_the_lane(lane, monkeypatch):
+    """The newest four a miner committed, 40/30/20/10; what no entry committed holds no place, and
+    with fewer than four the filled places share the whole lane."""
+    from vector_orchestrator.ids import submission_key
+
+    lane.intake(
+        [c("hk1", "m/one", A, 10), c("hk2", "m/two", B, 20)],
+        30,
+        api=FakeHub(
+            {f"m/one@{A}": {"model.safetensors": "w1"}, f"m/two@{B}": {"model.safetensors": "w2"}}
+        ),
+    )
+    one = {"key": submission_key("m/one", A), "repo": "m/one", "revision": A}
+    two = {"key": submission_key("m/two", B), "repo": "m/two", "revision": B}
+    stranger = {"key": submission_key("m/other", C), "repo": "m/other", "revision": C}
+    records = [
+        {"kind": "genesis", "king": stranger, "event_id": "e0", "finished_at": "t0"},
+        {"kind": "duel", "king": stranger, "challenger": one, "dethroned": True, "event_id": "e1",
+         "finished_at": "t1"},
+        {"kind": "duel", "king": one, "challenger": two, "dethroned": True, "event_id": "e2",
+         "finished_at": "t2"},
+    ]  # fmt: skip
+    monkeypatch.setattr(lane.engine.store, "iter_index", lambda: iter(records))
+
+    lane.publish_champions()
+
+    doc = json.loads(lane.engine.store.champions_path().read_text())
+    assert doc["schema"] == 1 and doc["lane_share"] == 0.3
+    assert doc["split"] == [0.4, 0.3, 0.2, 0.1]
+    assert [(p["place"], p["repo"], p["hotkey"], p["event_id"]) for p in doc["champions"]] == [
+        (1, "m/two", "hk2", "e2"),
+        (2, "m/one", "hk1", "e1"),
+    ]
+    assert [round(p["share"], 6) for p in doc["champions"]] == [
+        round(0.4 / 0.7, 6),
+        round(0.3 / 0.7, 6),
+    ]
+    assert doc["champions"][0]["key"] == two["key"] and doc["champions"][0]["crowned_at"] == "t2"
+
+
+def test_an_empty_store_publishes_no_champions(lane):
+    lane.publish_champions()
+    assert json.loads(lane.engine.store.champions_path().read_text())["champions"] == []
+
+
+def test_a_refresh_takes_new_commitments_in_and_republishes_the_queue(lane, monkeypatch):
+    from robotensor import hub
+
+    fake = FakeHub({f"m/one@{A}": {"model.safetensors": "w1"}})
+    real = hub.inspect
+    monkeypatch.setattr(hub, "inspect", lambda *a, **kw: real(*a, **{**kw, "api": fake}))
+
+    class Chain:
+        def commitments(self):
+            return [c("hk1", "m/one", A, 10)]
+
+        def block(self):
+            return 30
+
+    (changed,) = lane.refresh(Chain())
+
+    assert changed.status == "queued"
+    queue = json.loads(lane.engine.store.queue_path().read_text())
+    assert [e["hotkey"] for e in queue["entries"]] == ["hk1"]

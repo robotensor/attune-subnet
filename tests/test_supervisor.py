@@ -58,3 +58,46 @@ def test_the_pause_before_starting_a_dead_worker_again_grows():
     worker.backoff = min(worker.backoff * 2, 300.0)
 
     assert first == RESTART_S and worker.backoff == 2 * RESTART_S
+
+
+def test_the_refresher_refreshes_its_lane_on_a_connection_of_its_own(monkeypatch):
+    """What runs beside a step that takes hours: a failure is logged, and the next tick tries
+    again on a fresh connection."""
+    import threading
+    from types import SimpleNamespace
+
+    from robotensor import worker
+
+    opened, closed = [], []
+
+    class Chain:
+        def __init__(self, network, netuid):
+            opened.append((network, netuid))
+
+        def close(self):
+            closed.append(True)
+
+    calls = []
+    done = threading.Event()
+
+    class Lane:
+        name = "vector"
+
+        def refresh(self, chain):
+            calls.append(chain)
+            if len(calls) == 1:
+                raise RuntimeError("the chain went away")
+            if len(calls) == 3:
+                done.set()
+            return []
+
+    monkeypatch.setattr(worker.chain_, "Chain", Chain)
+    refresher = worker.Refresher(SimpleNamespace(network="test", netuid=7), Lane(), interval_s=0.01)
+    refresher.start()
+    assert done.wait(5)
+    refresher.stop.set()
+    refresher.join(5)
+
+    assert opened[0] == ("test", 7) and len(opened) == 2, "a failed tick reconnects"
+    assert calls[1] is calls[2] and calls[0] is not calls[1]
+    assert len(closed) == 2

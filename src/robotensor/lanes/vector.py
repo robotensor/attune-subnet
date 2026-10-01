@@ -16,16 +16,23 @@ one commitment per hotkey.
 genesis, scored on its own units. Each duel is seeded from a block after the challenger's
 commitment (`protocol.seed`) and run by `Orchestrator.run`, which publishes a record: the crown
 moves only when the challenger beats the king by the margin and the paired sign test says it is no
-accident. The queue is written to the store (`queue.json`) for the dashboard.
+accident. The queue is written to the store (`queue.json`) for the dashboard, and the orchestrator
+writes the duel's own progress beside it (`running.json`).
 
 **Champions.** The lane's champions are read back from the store: every record that crowned a
-model, newest first, each mapped to the hotkey that committed it.
+model, newest first, each mapped to the hotkey that committed it. The ones paid now - the newest
+four a miner committed, 40/30/20/10 - are written to the store too (`champions.json`).
+
+**While a duel runs.** A duel can take hours, and the chain does not stop meanwhile: `refresh` takes
+new commitments in and republishes the queue from another thread (the worker's). Everything that
+reads or writes the lane's state holds the lane's lock; the duel itself runs outside it.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -35,12 +42,15 @@ from ..chain import Commitment
 from ..config import VectorConfig
 from ..protocol import commitment as commitment_
 from ..protocol import seed as seed_
+from ..protocol.weights import CHAMPION_SPLIT
 from ..state import PENDING, QUEUED, State
 from .base import FAILED, IDLE, WAITING, WORKED, Award, Progress
 
 log = logging.getLogger(__name__)
 
 LANE = "vector"
+#: `champions.json`'s layout.
+CHAMPIONS_SCHEMA = 1
 
 
 @dataclass(frozen=True)
@@ -66,14 +76,17 @@ class VectorLane:
         self.state = state
         self.hub_token = hub_token
         self._engine: Any = None
+        #: Held by whatever reads or writes the lane's state: `refresh` runs beside a duel.
+        self._lock = threading.RLock()
 
     # -- the lane engine, built once --------------------------------------------------------
 
     @property
     def engine(self) -> Any:
-        if self._engine is None:
-            self._engine = self._build_engine()
-        return self._engine
+        with self._lock:
+            if self._engine is None:
+                self._engine = self._build_engine()
+            return self._engine
 
     def _build_engine(self) -> Any:
         # Where the orchestrator's RoboTwin driver finds the checkout it runs, and its interpreter.
@@ -119,6 +132,10 @@ class VectorLane:
 
     def intake(self, commitments: list[Commitment], block: int, *, api: Any = None) -> list[Entry]:
         """Take every new `vector:` commitment into the lane; the entries it changed."""
+        with self._lock:
+            return self._intake(commitments, block, api=api)
+
+    def _intake(self, commitments: list[Commitment], block: int, *, api: Any = None) -> list[Entry]:
         from vector_orchestrator.ids import submission_key
 
         lane = self.state.lane(LANE)
@@ -182,14 +199,24 @@ class VectorLane:
         return changed
 
     def queue(self) -> list[Entry]:
-        """The entries waiting for a duel, oldest commitment first."""
-        lane = self.state.lane(LANE)
-        waiting = [
-            self._entry(key, record)
-            for key, record in lane["entries"].items()
-            if record["status"] == QUEUED
-        ]
+        """The entries waiting for a duel, oldest commitment first. The one being duelled is still
+        queued until its duel ends."""
+        with self._lock:
+            lane = self.state.lane(LANE)
+            waiting = [
+                self._entry(key, record)
+                for key, record in lane["entries"].items()
+                if record["status"] == QUEUED
+            ]
         return sorted(waiting, key=lambda e: (e.commit_block, e.hotkey))
+
+    def refresh(self, chain: Any) -> list[Entry]:
+        """Intake and the queue republished: what the worker runs beside a duel, so a commitment
+        made while one runs is in the queue the dashboard shows within the minute rather than
+        after the duel. The entries that changed."""
+        changed = self.intake(chain.commitments(), chain.block())
+        self.publish_queue(self.queue())
+        return changed
 
     # -- duels ------------------------------------------------------------------------------
 
@@ -208,34 +235,35 @@ class VectorLane:
         head = self.engine.store.head() or {}
         king = SubmissionRef.from_dict(head.get("king"))
         challenger = SubmissionRef.resolved(entry.repo, entry.revision)
-        lane = self.state.lane(LANE)
-        record = lane["entries"][entry.key]
-        if king is not None and king.key == challenger.key:
-            record.update(status="duelled", reason="already holds the crown")
-            self.state.save()
-            return {"status": "skipped", "reason": "already holds the crown"}
-        block = seed_.seed_block(chain.block(), entry.commit_block)
-        seed = seed_.Seed(block, seed_.normalize_hash(chain.block_hash(block)))
-        # A duel resumed after a restart keeps its request (the same seed and block).
-        request = record.get("request")
-        if request and request.get("king") == (king.as_dict() if king else None):
-            req = DuelRequest.from_dict(request)
-        else:
-            req = DuelRequest(
-                challenger,
-                king,
-                block=self._claim_block(),
-                seed_block=seed.block,
-                seed_block_hash=seed.block_hash,
-            )
-            record["request"] = req.as_dict(self.spec)
-            self.state.save()
+        with self._lock:
+            record = self.state.lane(LANE)["entries"][entry.key]
+            if king is not None and king.key == challenger.key:
+                record.update(status="duelled", reason="already holds the crown")
+                self.state.save()
+                return {"status": "skipped", "reason": "already holds the crown"}
+            block = seed_.seed_block(chain.block(), entry.commit_block)
+            seed = seed_.Seed(block, seed_.normalize_hash(chain.block_hash(block)))
+            # A duel resumed after a restart keeps its request (the same seed and block).
+            request = record.get("request")
+            if request and request.get("king") == (king.as_dict() if king else None):
+                req = DuelRequest.from_dict(request)
+            else:
+                req = DuelRequest(
+                    challenger,
+                    king,
+                    block=self._claim_block(),
+                    seed_block=seed.block,
+                    seed_block_hash=seed.block_hash,
+                )
+                record["request"] = req.as_dict(self.spec)
+                self.state.save()
         try:
             with store_lock(self.engine.store.root):
                 result = self.engine.run(req)
         except CrownMoved:
-            record.pop("request", None)
-            self.state.save()
+            with self._lock:
+                record.pop("request", None)
+                self.state.save()
             raise
         doc = result.as_dict()
         outcome = (doc.get("record") or {}) if result.published else {}
@@ -245,18 +273,20 @@ class VectorLane:
             status = "duelled"
         else:
             status = result.status  # refused or void
-        record.update(status=status, reason=result.reason, event_id=result.event_id)
-        record.pop("request", None)
-        self.state.save()
+        with self._lock:
+            record.update(status=status, reason=result.reason, event_id=result.event_id)
+            record.pop("request", None)
+            self.state.save()
         return doc
 
     def _claim_block(self) -> int:
         """The next number in the lane's own duel sequence (the orchestrator's `block`)."""
-        lane = self.state.lane(LANE)
-        head = int((self.engine.store.head() or {}).get("block") or 0)
-        lane["block_counter"] = max(int(lane["block_counter"]), head) + 1
-        self.state.save()
-        return int(lane["block_counter"])
+        with self._lock:
+            lane = self.state.lane(LANE)
+            head = int((self.engine.store.head() or {}).get("block") or 0)
+            lane["block_counter"] = max(int(lane["block_counter"]), head) + 1
+            self.state.save()
+            return int(lane["block_counter"])
 
     # -- the validator's view ----------------------------------------------------------------
 
@@ -267,6 +297,7 @@ class VectorLane:
 
         queue = self.queue()
         self.publish_queue(queue)
+        self.publish_champions()
         if not queue:
             return Progress(LANE, IDLE, "nothing queued")
         entry = queue[0]
@@ -289,6 +320,7 @@ class VectorLane:
             f"king={record.get('king_score')} challenger={record.get('challenger_score')}"
         )
         self.publish_queue(self.queue())
+        self.publish_champions()
         return Progress(LANE, WORKED, detail, record)
 
     def publish_queue(self, queue: list[Entry]) -> None:
@@ -303,15 +335,34 @@ class VectorLane:
                     "key": submission_key(e.repo, e.revision),
                     "repo": e.repo,
                     "revision": e.revision,
+                    "hotkey": e.hotkey,
                     "block": e.commit_block,
                 }
                 for e in queue
             ]
         }
-        store = self.engine.store
-        if read_json(store.queue_path()) == snapshot:
-            return
-        store.write_queue(snapshot)
+        with self._lock:
+            store = self.engine.store
+            if read_json(store.queue_path()) == snapshot:
+                return
+            store.write_queue(snapshot)
+        self.engine.push_touched()
+
+    def publish_champions(self) -> None:
+        """The champions paid now into the store's `champions.json`; pushed only when changed."""
+        from vector_orchestrator.store.writer import read_json
+
+        doc = {
+            "schema": CHAMPIONS_SCHEMA,
+            "lane_share": self.cfg.share,
+            "split": list(CHAMPION_SPLIT),
+            "champions": self.paid(),
+        }
+        with self._lock:
+            store = self.engine.store
+            if read_json(store.champions_path()) == doc:
+                return
+            store.write_champions(doc)
         self.engine.push_touched()
 
     def award(self) -> Award:
@@ -333,9 +384,38 @@ class VectorLane:
     def champions(self) -> list[str | None]:
         """Every model this lane crowned, newest first, as the hotkey that committed it; None for
         one no entry of this validator's committed. Read from the store's index."""
+        return [hotkey for _, hotkey, _ in self._crowned()]
+
+    def paid(self) -> list[dict[str, Any]]:
+        """The champions `protocol.weights` pays now, newest first: the newest crowned models a
+        miner committed, one place each, with the part of the lane's share each place takes (the
+        filled places share it all, in the split's proportions). A hotkey since deregistered still
+        holds its place here; the weights burn its part."""
+        held = [(model, hotkey, record) for model, hotkey, record in self._crowned() if hotkey]
+        held = held[: len(CHAMPION_SPLIT)]
+        parts = CHAMPION_SPLIT[: len(held)]
+        total = sum(parts)
+        return [
+            {
+                "place": place,
+                **model,
+                "hotkey": hotkey,
+                "share": part / total,
+                "event_id": record.get("event_id"),
+                "crowned_at": record.get("finished_at"),
+            }
+            for place, ((model, hotkey, record), part) in enumerate(
+                zip(held, parts, strict=True), start=1
+            )
+        ]
+
+    def _crowned(self) -> list[tuple[dict[str, Any], str | None, dict[str, Any]]]:
+        """Every crowning in the index, newest first: the model, its hotkey (None for one no entry
+        of this validator's committed) and the record that crowned it."""
         from vector_orchestrator.ids import submission_key
 
-        entries = self.state.lane(LANE)["entries"]
+        with self._lock:
+            entries = dict(self.state.lane(LANE)["entries"])
         crowned = []
         for record in self.engine.store.iter_index():
             if record.get("kind") == "genesis":
@@ -345,10 +425,11 @@ class VectorLane:
             else:
                 continue
             if not isinstance(king, dict):
-                crowned.append(None)
+                crowned.append(({}, None, record))
                 continue
             key = king.get("key") or submission_key(king["repo"], king["revision"])
-            crowned.append((entries.get(key) or {}).get("hotkey"))
+            model = {"key": key, "repo": king.get("repo"), "revision": king.get("revision")}
+            crowned.append((model, (entries.get(key) or {}).get("hotkey"), record))
         return list(reversed(crowned))
 
     @staticmethod

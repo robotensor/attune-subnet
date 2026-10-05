@@ -4,12 +4,13 @@ This module is the chain's side of the lane and nothing else. The lane engine is
 `vector_orchestrator` (duels, the weights runtime, the store), run as a library on its `spec.json`;
 the benchmark is the RoboTwin-Vector checkout; the model code is `vector_runtime`. What happens here:
 
-**Intake.** Every `vector:` commitment on chain is read with the block it was made at. A new one is
-looked up on the Hub (`hub.inspect`): a repository holding anything but the weights and a README is
-refused; one the Hub does not show yet (still private) waits `private_window_blocks` and is then
-refused; weights byte-identical to an earlier commitment's (same sha256, from the Hub's LFS
-metadata) are a `duplicate` - the earliest commitment keeps them. Otherwise the commitment is
-`queued`.
+**Intake.** Every `vector:` commitment on chain is read with the block it was made at: a repository,
+a revision and the sha256 of its weights (`protocol.commitment`). A new one is looked up on the Hub
+(`hub.inspect`): a repository holding anything but the weights and a README is refused; one the Hub
+does not show yet (still private) waits `private_window_blocks` and is then refused; weights that do
+not hash to the committed digest are refused; weights byte-identical to an earlier commitment's
+(same sha256, from the Hub's LFS metadata) are a `duplicate` - the earliest commitment keeps them.
+Otherwise the commitment is `queued`.
 
 **One submission per hotkey.** A hotkey's first commitment to be queued is its only one: from then
 on, whatever it commits is `refused` - while that entry waits, during its duel, and after it, won
@@ -194,6 +195,17 @@ class VectorLane:
                 changed.append(self._entry(key, record))
                 continue
             record["weights_sha256"] = found.weights_sha256
+            if sub.digest != found.weights_sha256:
+                record.update(
+                    status="refused",
+                    reason=(
+                        f"the commitment names weights {sub.digest}, but {hub.WEIGHTS_FILE} at "
+                        f"{sub.revision[:12]} hashes to {found.weights_sha256}"
+                    ),
+                )
+                entries[key] = record
+                changed.append(self._entry(key, record))
+                continue
             owner = by_weights.get(found.weights_sha256)
             if owner is not None and owner != key:
                 record.update(status="duplicate", reason=f"the same weights as {owner}")

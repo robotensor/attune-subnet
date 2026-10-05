@@ -1,5 +1,6 @@
 """The Vector lane's intake, against a fake Hub and the real orchestrator contract."""
 
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +16,13 @@ from robotensor.state import State
 pytest.importorskip("vector_orchestrator")
 
 A, B, C = "a" * 40, "b" * 40, "c" * 40
+#: The weights each revision holds in these tests, by a label the fake Hub hashes to a digest.
+WEIGHTS = {A: "w1", B: "w2", C: "w3"}
+
+
+def digest(label):
+    """The sha256 the fake Hub reports for weights labelled `label`."""
+    return hashlib.sha256(label.encode()).hexdigest()
 
 
 class FakeHub:
@@ -36,7 +44,7 @@ class FakeHub:
             SimpleNamespace(
                 rfilename=name,
                 size=7,
-                lfs=SimpleNamespace(sha256=sha) if sha else None,
+                lfs=SimpleNamespace(sha256=digest(sha)) if sha else None,
             )
             for name, sha in files.items()
         ]
@@ -61,8 +69,11 @@ def lane(tmp_path):
     return VectorLane(cfg, State(tmp_path / "state"))
 
 
-def c(hotkey, repo, sha, block):
-    return Commitment(hotkey=hotkey, block=block, data=commitment.encode(repo, sha))
+def c(hotkey, repo, sha, block, weights=None):
+    """A commitment of `repo@sha` naming the weights labelled `weights` (by default the ones
+    `WEIGHTS` says that revision holds)."""
+    data = commitment.encode(repo, sha, digest(weights or WEIGHTS[sha]))
+    return Commitment(hotkey=hotkey, block=block, data=data)
 
 
 def test_new_commitments_are_queued_oldest_first(lane):
@@ -115,7 +126,9 @@ def test_copied_weights_are_a_duplicate_and_the_earliest_commitment_keeps_them(l
     hub = FakeHub(
         {f"m/orig@{A}": {"model.safetensors": "same"}, f"x/copy@{B}": {"model.safetensors": "same"}}
     )
-    lane.intake([c("copier", "x/copy", B, 12), c("author", "m/orig", A, 10)], 30, api=hub)
+    lane.intake(
+        [c("copier", "x/copy", B, 12, "same"), c("author", "m/orig", A, 10, "same")], 30, api=hub
+    )
     queued = lane.queue()
     assert [e.hotkey for e in queued] == ["author"]
     entries = lane.state.lane("vector")["entries"]
@@ -392,3 +405,20 @@ def test_a_refresh_takes_new_commitments_in_and_republishes_the_queue(lane, monk
     assert changed.status == "queued"
     queue = json.loads(lane.engine.store.queue_path().read_text())
     assert [e["hotkey"] for e in queue["entries"]] == ["hk1"]
+
+
+def test_weights_that_are_not_the_committed_digest_are_refused(lane):
+    """The commitment pins the weights: the same repository and revision holding other weights than
+    the digest says is refused, and uses nothing up."""
+    (entry,) = lane.intake(
+        [c("hk1", "m/one", A, 10, "something-else")],
+        30,
+        api=FakeHub({f"m/one@{A}": {"model.safetensors": "w1"}}),
+    )
+    assert entry.status == "refused"
+    reason = lane.state.lane("vector")["entries"][entry.key]["reason"]
+    assert digest("something-else") in reason and digest("w1") in reason
+    (fixed,) = lane.intake(
+        [c("hk1", "m/one", B, 40)], 50, api=FakeHub({f"m/one@{B}": {"model.safetensors": "w2"}})
+    )
+    assert fixed.status == "queued"

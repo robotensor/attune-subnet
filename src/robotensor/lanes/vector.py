@@ -5,29 +5,40 @@ This module is the chain's side of the lane and nothing else. The lane engine is
 the benchmark is the RoboTwin-Vector checkout; the model code is `vector_runtime`. What happens here:
 
 **Intake.** Every `vector:` commitment on chain is read with the block it was made at: a repository,
-a revision and the sha256 of its weights (`protocol.commitment`). A new one is looked up on the Hub
-(`hub.inspect`): a repository holding anything but the weights and a README is refused; one the Hub
-does not show yet (still private) waits `private_window_blocks` and is then refused; weights that do
-not hash to the committed digest are refused; weights byte-identical to an earlier commitment's
-(same sha256, from the Hub's LFS metadata) are a `duplicate` - the earliest commitment keeps them.
-Otherwise the commitment is `queued`.
+a revision and the sha256 of its weights (`protocol.commitment`). A new one is `queued` at once:
+nothing is asked of the Hub until its turn comes.
 
-**One submission per hotkey.** A hotkey's first commitment to be queued is its only one: from then
-on, whatever it commits is `refused` - while that entry waits, during its duel, and after it, won
-or lost. A commitment that never reached the queue (refused by the Hub check, a duplicate, still
-waiting for the Hub) uses nothing up, and a newer commitment from the same hotkey replaces one still
-waiting for the Hub: the chain keeps one commitment per hotkey.
+**One submission per hotkey.** A hotkey's first commitment to reach the queue is its only one: from
+then on, whatever it commits is `refused` - while that entry waits, during its duel, and after it,
+whatever became of it. Queued is spent, as one reveal is one shot.
 
-**Duels.** The queue is served oldest commitment first; the oldest takes an empty throne by
-genesis, scored on its own units. Each duel is seeded from the chain's finalized head, which must
-come after the challenger's commitment (`protocol.seed`), and run by `Orchestrator.run`, which
-publishes a record: the crown moves only when the challenger's average success rate beats the
-king's by the margin. The queue is written to the store (`queue.json`) for the dashboard, and the
-orchestrator writes the duel's own progress beside it (`running.json`).
+**Duels.** The queue is served oldest commitment first. Each duel is seeded from the chain's
+finalized head, which must come after the challenger's commitment (`protocol.seed`). Then, and only
+then, the challenger is looked up on the Hub (`hub.inspect`):
+
+- a repository the Hub does not show (deleted, private, a revision it does not have) is passed
+  over and the next entry duels instead. Within `private_window_blocks` of its commitment it keeps
+  its place, for a miner who committed before making the repository public; after that it is
+  `missing` and leaves the queue;
+- a repository holding anything but the weights and a README, or weights that do not hash to the
+  committed digest, is `refused`; weights byte-identical to an earlier entry's are a `duplicate`;
+- a Hub that does not answer decides nothing: the entry stays queued and the step fails.
+
+The oldest admitted entry takes an empty throne by genesis, scored on its own units; otherwise it
+duels the king through `Orchestrator.run`, which publishes a record: the crown moves only when the
+challenger's average success rate beats the king's by the margin. The queue is written to the store
+(`queue.json`) for the dashboard, and the orchestrator writes the duel's own progress beside it
+(`running.json`).
+
+**A king whose repository is gone.** Before every duel the king is looked up on the Hub too. A king
+the Hub no longer shows is dethroned without a duel (`Orchestrator.vacate`, an event of kind
+`vacate`): the throne is empty and the next entry takes it by genesis. The place it holds among the
+champions is kept, but its part is burned rather than paid (`protocol.weights.BURNED`).
 
 **Champions.** The lane's champions are read back from the store: every record that crowned a
 model, newest first, each mapped to the hotkey that committed it. The ones paid now - the newest
-four a miner committed, 40/30/20/10 - are written to the store too (`champions.json`).
+four a miner committed, 40/30/20/10 - are written to the store too (`champions.json`); a vacated
+king's place is there with its part marked burned.
 
 **While a duel runs.** A duel can take hours, and the chain does not stop meanwhile: `refresh` takes
 new commitments in and republishes the queue from another thread (the worker's). Everything that
@@ -48,7 +59,7 @@ from ..chain import Commitment
 from ..config import VectorConfig
 from ..protocol import commitment as commitment_
 from ..protocol import seed as seed_
-from ..protocol.weights import CHAMPION_SPLIT
+from ..protocol.weights import BURNED, CHAMPION_SPLIT
 from ..state import PENDING, QUEUED, State
 from .base import FAILED, IDLE, WAITING, WORKED, Award, Progress
 
@@ -56,7 +67,11 @@ log = logging.getLogger(__name__)
 
 LANE = "vector"
 #: An entry that reached the queue: its hotkey has made its one submission.
-SUBMITTED = (QUEUED, "duelled", "crowned", "void")
+SUBMITTED = (QUEUED, "duelled", "crowned", "void", "missing", "vacated")
+#: An entry whose repository the Hub did not show at its turn, and which has left the queue.
+MISSING = "missing"
+#: A king dethroned because its repository was gone.
+VACATED = "vacated"
 #: `champions.json`'s layout.
 CHAMPIONS_SCHEMA = 1
 
@@ -146,8 +161,7 @@ class VectorLane:
     def _intake(self, commitments: list[Commitment], block: int, *, api: Any = None) -> list[Entry]:
         from vector_orchestrator.ids import submission_key
 
-        lane = self.state.lane(LANE)
-        entries, by_weights = lane["entries"], lane["by_weights"]
+        entries = self.state.lane(LANE)["entries"]
         changed = []
         for c in sorted(commitments, key=lambda c: (c.block, c.hotkey)):
             try:
@@ -157,70 +171,26 @@ class VectorLane:
             if sub.lane != commitment_.VECTOR:
                 continue
             key = submission_key(sub.repo, sub.revision)
-            known = entries.get(key)
-            if known is not None and known["status"] != PENDING:
+            # `pending` is what an older build left waiting for the Hub; it is queued like a new one.
+            if key in entries and entries[key]["status"] != PENDING:
                 continue
-            record = known or {
+            record = {
                 "hotkey": c.hotkey,
                 "repo": sub.repo,
                 "revision": sub.revision,
+                "digest": sub.digest,
                 "commit_block": c.block,
-                "status": PENDING,
+                "status": QUEUED,
                 "reason": "",
+                "submitted": True,
             }
             spent = self._submission_of(c.hotkey, besides=key)
             if spent is not None:
                 record.update(
                     status="refused",
                     reason=f"this hotkey has made its one submission ({spent})",
+                    submitted=False,
                 )
-                entries[key] = record
-                changed.append(self._entry(key, record))
-                continue
-            try:
-                found = hub.inspect(
-                    sub.repo, sub.revision, self.shape, api=api, token=self.hub_token
-                )
-            except hub.NotVisible as exc:
-                if block - c.block > self.cfg.private_window_blocks:
-                    record.update(status="refused", reason=f"not on the Hub: {exc}")
-                else:
-                    record.update(status=PENDING, reason=f"waiting for the Hub: {exc}")
-                entries[key] = record
-                changed.append(self._entry(key, record))
-                continue
-            except hub.NotASubmission as exc:
-                record.update(status="refused", reason=str(exc))
-                entries[key] = record
-                changed.append(self._entry(key, record))
-                continue
-            record["weights_sha256"] = found.weights_sha256
-            if sub.digest != found.weights_sha256:
-                record.update(
-                    status="refused",
-                    reason=(
-                        f"the commitment names weights {sub.digest}, but {hub.WEIGHTS_FILE} at "
-                        f"{sub.revision[:12]} hashes to {found.weights_sha256}"
-                    ),
-                )
-                entries[key] = record
-                changed.append(self._entry(key, record))
-                continue
-            owner = by_weights.get(found.weights_sha256)
-            if owner is not None and owner != key:
-                record.update(status="duplicate", reason=f"the same weights as {owner}")
-            else:
-                by_weights[found.weights_sha256] = key
-                # The chain keeps one commitment per hotkey: its older entry still waiting for the
-                # Hub is gone.
-                for other_key, other in entries.items():
-                    if (
-                        other_key != key
-                        and other["hotkey"] == c.hotkey
-                        and other["status"] == PENDING
-                    ):
-                        other.update(status="superseded", reason=f"replaced by {key}")
-                record.update(status=QUEUED, reason="", submitted=True)
             entries[key] = record
             changed.append(self._entry(key, record))
         if changed:
@@ -288,6 +258,9 @@ class VectorLane:
             if request and request.get("king") == (king.as_dict() if king else None):
                 req = DuelRequest.from_dict(request)
             else:
+                passed = self._admit(entry, record, chain)
+                if passed is not None:
+                    return passed
                 req = DuelRequest(
                     challenger,
                     king,
@@ -319,6 +292,81 @@ class VectorLane:
             self.state.save()
         return doc
 
+    def _admit(self, entry: Entry, record: dict[str, Any], chain: Any) -> dict[str, Any] | None:
+        """Look the challenger up on the Hub at its turn: None when it may duel, else why it is
+        passed over (`{"status": "skipped", ...}`), with its record updated. `hub.HubUnreachable`
+        when the Hub does not answer: nothing is decided and the entry keeps its place. Called
+        holding the lane's lock."""
+        by_weights = self.state.lane(LANE)["by_weights"]
+        try:
+            found = hub.inspect(entry.repo, entry.revision, self.shape, token=self.hub_token)
+        except hub.HubUnreachable:
+            raise
+        except hub.NotVisible as exc:
+            if chain.block() - entry.commit_block <= self.cfg.private_window_blocks:
+                # Still inside the window a miner has to make a private repository public.
+                record.update(reason=f"waiting for the Hub: {exc}")
+                self.state.save()
+                return {"status": "skipped", "reason": record["reason"], "queued": True}
+            record.update(status=MISSING, reason=f"not on the Hub: {exc}")
+            self.state.save()
+            return {"status": "skipped", "reason": record["reason"]}
+        except hub.NotASubmission as exc:
+            record.update(status="refused", reason=str(exc))
+            self.state.save()
+            return {"status": "skipped", "reason": record["reason"]}
+        record["weights_sha256"] = found.weights_sha256
+        digest = record.get("digest")
+        if digest and digest != found.weights_sha256:
+            record.update(
+                status="refused",
+                reason=(
+                    f"the commitment names weights {digest}, but {hub.WEIGHTS_FILE} at "
+                    f"{entry.revision[:12]} hashes to {found.weights_sha256}"
+                ),
+            )
+            self.state.save()
+            return {"status": "skipped", "reason": record["reason"]}
+        owner = by_weights.get(found.weights_sha256)
+        if owner is not None and owner != entry.key:
+            record.update(status="duplicate", reason=f"the same weights as {owner}")
+            self.state.save()
+            return {"status": "skipped", "reason": record["reason"]}
+        by_weights[found.weights_sha256] = entry.key
+        record["reason"] = ""
+        self.state.save()
+        return None
+
+    def check_king(self) -> str | None:
+        """Look the king up on the Hub, and take the crown from it if the Hub no longer shows its
+        repository: why it was vacated, or None when there is no king or it is still there.
+        `hub.HubUnreachable` when the Hub does not answer: a king is never dethroned on silence."""
+        from vector_orchestrator.ids import SubmissionRef
+        from vector_orchestrator.store.writer import store_lock
+
+        king = SubmissionRef.from_dict((self.engine.store.head() or {}).get("king"))
+        if king is None:
+            return None
+        try:
+            hub.inspect(king.repo, king.revision, self.shape, token=self.hub_token)
+        except hub.HubUnreachable:
+            raise
+        except hub.NotVisible as exc:
+            reason = f"the king's repository is gone: {exc}"
+        except hub.NotASubmission:
+            return None  # what a pinned revision holds cannot change; it was admitted once
+        else:
+            return None
+        log.warning("vacating the throne: %s", reason)
+        with store_lock(self.engine.store.root):
+            self.engine.vacate(king, block=self._claim_block(), reason=reason)
+        with self._lock:
+            record = self.state.lane(LANE)["entries"].get(king.key)
+            if record is not None:
+                record.update(status=VACATED, reason=reason)
+                self.state.save()
+        return reason
+
     def _claim_block(self) -> int:
         """The next number in the lane's own duel sequence (the orchestrator's `block`)."""
         with self._lock:
@@ -331,37 +379,54 @@ class VectorLane:
     # -- the validator's view ----------------------------------------------------------------
 
     def step(self, chain: Any) -> Progress:
-        """One duel: the oldest entry against the king, or on an empty throne a genesis (`duel`
-        with no king). Never raises the orchestrator's."""
+        """One duel: the king checked first (and vacated if its repository is gone), then the
+        oldest entry the Hub shows against it, or on an empty throne a genesis (`duel` with no
+        king). An entry whose repository is not there is passed over for the next. Never raises
+        the orchestrator's."""
         from vector_orchestrator.duel.orchestrate import CrownMoved, DuelFailed
 
-        queue = self.queue()
-        self.publish_queue(queue)
-        self.publish_champions()
-        if not queue:
-            return Progress(LANE, IDLE, "nothing queued")
-        entry = queue[0]
-        log.info(
-            "duel: %s from %s (committed at %s)", entry.entry, entry.hotkey, entry.commit_block
-        )
-        try:
-            result = self.duel(entry, chain)
-        except seed_.NotYet as exc:
-            return Progress(LANE, WAITING, str(exc))
-        except CrownMoved as exc:
-            # The king changed under us; the entry is still queued and duels the new one next.
-            return Progress(LANE, WAITING, f"the crown moved, duelling again: {exc}")
-        except DuelFailed as exc:
-            log.error("duel of %s failed (it stays queued): %s", entry.entry, exc)
-            return Progress(LANE, FAILED, str(exc))
-        record = result.get("record") or {}
-        detail = (
-            f"{result['reason']}; dethroned={record.get('dethroned')} "
-            f"king={record.get('king_score')} challenger={record.get('challenger_score')}"
-        )
         self.publish_queue(self.queue())
         self.publish_champions()
-        return Progress(LANE, WORKED, detail, record)
+        try:
+            vacated = self.check_king()
+        except hub.HubUnreachable as exc:
+            return Progress(LANE, FAILED, f"cannot check the king: {exc}")
+        if vacated:
+            self.publish_champions()
+        queue = self.queue()
+        if not queue:
+            return Progress(LANE, IDLE, "nothing queued")
+        passed = []
+        for entry in queue:
+            log.info(
+                "duel: %s from %s (committed at %s)", entry.entry, entry.hotkey, entry.commit_block
+            )
+            try:
+                result = self.duel(entry, chain)
+            except seed_.NotYet as exc:
+                return Progress(LANE, WAITING, str(exc))
+            except hub.HubUnreachable as exc:
+                return Progress(LANE, FAILED, f"cannot look {entry.entry} up: {exc}")
+            except CrownMoved as exc:
+                # The king changed under us; the entry is still queued and duels the new one next.
+                return Progress(LANE, WAITING, f"the crown moved, duelling again: {exc}")
+            except DuelFailed as exc:
+                log.error("duel of %s failed (it stays queued): %s", entry.entry, exc)
+                return Progress(LANE, FAILED, str(exc))
+            if result.get("status") == "skipped":
+                log.info("passed over %s: %s", entry.entry, result.get("reason"))
+                passed.append(f"{entry.entry}: {result.get('reason')}")
+                self.publish_queue(self.queue())
+                continue
+            record = result.get("record") or {}
+            detail = (
+                f"{result['reason']}; dethroned={record.get('dethroned')} "
+                f"king={record.get('king_score')} challenger={record.get('challenger_score')}"
+            )
+            self.publish_queue(self.queue())
+            self.publish_champions()
+            return Progress(LANE, WORKED, detail, record)
+        return Progress(LANE, WAITING, "; ".join(passed))
 
     def publish_queue(self, queue: list[Entry]) -> None:
         """The waiting entries into the store's `queue.json`, as the dashboard shows them; pushed
@@ -423,15 +488,18 @@ class VectorLane:
 
     def champions(self) -> list[str | None]:
         """Every model this lane crowned, newest first, as the hotkey that committed it; None for
-        one no entry of this validator's committed. Read from the store's index."""
-        return [hotkey for _, hotkey, _ in self._crowned()]
+        one no entry of this validator's committed, and `BURNED` for one vacated as king (it holds
+        its place, and its part burns). Read from the store's index."""
+        return [
+            BURNED if hotkey and vacated else hotkey for _, hotkey, _, vacated in self._crowned()
+        ]
 
     def paid(self) -> list[dict[str, Any]]:
         """The champions `protocol.weights` pays now, newest first: the newest crowned models a
         miner committed, one place each, with the part of the lane's share each place takes (the
         filled places share it all, in the split's proportions). A hotkey since deregistered still
         holds its place here; the weights burn its part."""
-        held = [(model, hotkey, record) for model, hotkey, record in self._crowned() if hotkey]
+        held = [crowned for crowned in self._crowned() if crowned[1]]
         held = held[: len(CHAMPION_SPLIT)]
         parts = CHAMPION_SPLIT[: len(held)]
         total = sum(parts)
@@ -441,23 +509,34 @@ class VectorLane:
                 **model,
                 "hotkey": hotkey,
                 "share": part / total,
+                # A king vacated because its repository was gone: its part goes to the burn UID.
+                "burned": vacated,
                 "event_id": record.get("event_id"),
                 "crowned_at": record.get("finished_at"),
             }
-            for place, ((model, hotkey, record), part) in enumerate(
+            for place, ((model, hotkey, record, vacated), part) in enumerate(
                 zip(held, parts, strict=True), start=1
             )
         ]
 
-    def _crowned(self) -> list[tuple[dict[str, Any], str | None, dict[str, Any]]]:
+    def _crowned(self) -> list[tuple[dict[str, Any], str | None, dict[str, Any], bool]]:
         """Every crowning in the index, newest first: the model, its hotkey (None for one no entry
-        of this validator's committed) and the record that crowned it."""
+        of this validator's committed), the record that crowned it, and whether it was later
+        vacated as king."""
         from vector_orchestrator.ids import submission_key
 
         with self._lock:
             entries = dict(self.state.lane(LANE)["entries"])
+        index = list(self.engine.store.iter_index())
+        vacated = {
+            (record.get("king") or {}).get("key")
+            for record in index
+            if record.get("kind") == "vacate" and isinstance(record.get("king"), dict)
+        }
         crowned = []
-        for record in self.engine.store.iter_index():
+        for record in index:
+            if record.get("kind") == "vacate":
+                continue
             if record.get("kind") == "genesis":
                 king = record.get("king")  # a genesis names what it crowns in its king slot
             elif record.get("dethroned"):
@@ -465,11 +544,12 @@ class VectorLane:
             else:
                 continue
             if not isinstance(king, dict):
-                crowned.append(({}, None, record))
+                crowned.append(({}, None, record, False))
                 continue
             key = king.get("key") or submission_key(king["repo"], king["revision"])
             model = {"key": key, "repo": king.get("repo"), "revision": king.get("revision")}
-            crowned.append((model, (entries.get(key) or {}).get("hotkey"), record))
+            hotkey = (entries.get(key) or {}).get("hotkey")
+            crowned.append((model, hotkey, record, key in vacated))
         return list(reversed(crowned))
 
     @staticmethod

@@ -14,6 +14,8 @@ Rules, all keyed by hotkey and mapped to UIDs only at the end, because UIDs are 
   in the same proportions.
 - An entry whose hotkey is no longer registered gives its part to the burn UID rather than to the
   other champions: a champion's reward does not grow because another one left.
+- A champion vacated as king because its repository was gone (`BURNED`) keeps its place, and its
+  part goes to the burn UID: the emission it would have earned is burned, not handed on.
 - Everything not given to a champion goes to the burn UID. Weights sum to 1.
 
 Two cadences, one formula. `split = (0.4, 0.3, 0.2, 0.1)` is Vector's pool. `split = (1.0,)` is
@@ -29,6 +31,9 @@ from dataclasses import dataclass
 
 #: The subnet spec's reward pool: the four most recent champions, newest first.
 CHAMPION_SPLIT = (0.40, 0.30, 0.20, 0.10)
+#: A champion's place whose part is burned: a king vacated because its repository was gone. Never
+#: an ss58 address, so it never maps to a UID.
+BURNED = "<burned>"
 
 
 @dataclass(frozen=True)
@@ -36,7 +41,8 @@ class Lane:
     name: str
     #: The lane's share of the miner emissions, in [0, 1].
     share: float
-    #: Its champions' hotkeys, newest first; None for a baseline entry, which is skipped.
+    #: Its champions' hotkeys, newest first; None for a baseline entry, which is skipped, and
+    #: `BURNED` for a place whose part burns.
     champions: Sequence[str | None]
     #: Each paid place's part of the lane's share, newest first; its length is how many are paid.
     split: Sequence[float] = CHAMPION_SPLIT
@@ -68,7 +74,7 @@ def weight_vector(
         parts = lane.split[: len(entries)]
         scale = lane.share / sum(parts)
         for hotkey, part in zip(entries, parts, strict=True):
-            uid = uids.get(hotkey)
+            uid = None if hotkey == BURNED else uids.get(hotkey)
             if uid is None:
                 burned += part * scale
             else:

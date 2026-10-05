@@ -32,6 +32,11 @@ class NotVisible(RuntimeError):
     """The Hub will not show the repository at that commit (missing, private, or a bad sha)."""
 
 
+class HubUnreachable(NotVisible):
+    """The Hub did not answer (a server error, a timeout, no connection): it said nothing about the
+    repository, so nothing may be decided from it. A `NotVisible` to a caller that only waits."""
+
+
 class NotASubmission(ValueError):
     """The repository holds what this competition's submission may not, or lacks what it must."""
 
@@ -195,7 +200,12 @@ def inspect(
     except (RepositoryNotFoundError, RevisionNotFoundError, GatedRepoError) as exc:
         raise NotVisible(f"{repo}@{revision}: {type(exc).__name__}") from None
     except HfHubHTTPError as exc:
-        raise NotVisible(f"{repo}@{revision}: {exc}") from None
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in (401, 403, 404):
+            raise NotVisible(f"{repo}@{revision}: {exc}") from None
+        raise HubUnreachable(f"{repo}@{revision}: {exc}") from None
+    except OSError as exc:  # requests' connection errors and timeouts are OSErrors
+        raise HubUnreachable(f"{repo}@{revision}: {type(exc).__name__}: {exc}") from None
     if getattr(info, "sha", None) != revision:
         raise NotVisible(f"{repo}@{revision}: the Hub resolved it to {getattr(info, 'sha', None)}")
 

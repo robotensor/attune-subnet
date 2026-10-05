@@ -16,14 +16,11 @@ whatever became of it. Queued is spent, as one reveal is one shot.
 finalized head, which must come after the challenger's commitment (`protocol.seed`). Then, and only
 then, the challenger is looked up on the Hub (`hub.inspect`):
 
-- a repository the Hub does not show (deleted, private, a revision it does not have) is passed
-  over and the next entry duels instead. Within `private_window_blocks` of its commitment it keeps
-  its place, for a miner who committed before making the repository public; after that it is
-  `missing` and leaves the queue;
+- a repository the Hub does not show (deleted, private, a revision it does not have) is `missing`:
+  it leaves the queue and the next entry duels instead. A Hub that does not answer is the same as a
+  repository that is not there: nothing waits on it;
 - a repository holding anything but the weights and a README, or weights that do not hash to the
   committed digest, is `refused`; weights byte-identical to an earlier entry's are a `duplicate`;
-- a Hub that does not answer decides nothing: the entry stays queued and the step fails.
-
 The oldest admitted entry takes an empty throne by genesis, scored on its own units; otherwise it
 duels the king through `Orchestrator.run`, which publishes a record: the crown moves only when the
 challenger's average success rate beats the king's by the margin. The queue is written to the store
@@ -31,7 +28,7 @@ challenger's average success rate beats the king's by the margin. The queue is w
 (`running.json`).
 
 **A king whose repository is gone.** Before every duel the king is looked up on the Hub too. A king
-the Hub no longer shows is dethroned without a duel (`Orchestrator.vacate`, an event of kind
+the Hub no longer shows (or a Hub that does not answer) is dethroned without a duel (`Orchestrator.vacate`, an event of kind
 `vacate`): the throne is empty and the next entry takes it by genesis. The place it holds among the
 champions is kept, but its part is burned rather than paid (`protocol.weights.BURNED`).
 
@@ -258,7 +255,7 @@ class VectorLane:
             if request and request.get("king") == (king.as_dict() if king else None):
                 req = DuelRequest.from_dict(request)
             else:
-                passed = self._admit(entry, record, chain)
+                passed = self._admit(entry, record)
                 if passed is not None:
                     return passed
                 req = DuelRequest(
@@ -292,22 +289,14 @@ class VectorLane:
             self.state.save()
         return doc
 
-    def _admit(self, entry: Entry, record: dict[str, Any], chain: Any) -> dict[str, Any] | None:
+    def _admit(self, entry: Entry, record: dict[str, Any]) -> dict[str, Any] | None:
         """Look the challenger up on the Hub at its turn: None when it may duel, else why it is
-        passed over (`{"status": "skipped", ...}`), with its record updated. `hub.HubUnreachable`
-        when the Hub does not answer: nothing is decided and the entry keeps its place. Called
-        holding the lane's lock."""
+        passed over (`{"status": "skipped", ...}`), with its record updated. A Hub that does not
+        answer is a repository that is not there. Called holding the lane's lock."""
         by_weights = self.state.lane(LANE)["by_weights"]
         try:
             found = hub.inspect(entry.repo, entry.revision, self.shape, token=self.hub_token)
-        except hub.HubUnreachable:
-            raise
-        except hub.NotVisible as exc:
-            if chain.block() - entry.commit_block <= self.cfg.private_window_blocks:
-                # Still inside the window a miner has to make a private repository public.
-                record.update(reason=f"waiting for the Hub: {exc}")
-                self.state.save()
-                return {"status": "skipped", "reason": record["reason"], "queued": True}
+        except hub.NotVisible as exc:  # HubUnreachable too
             record.update(status=MISSING, reason=f"not on the Hub: {exc}")
             self.state.save()
             return {"status": "skipped", "reason": record["reason"]}
@@ -339,8 +328,8 @@ class VectorLane:
 
     def check_king(self) -> str | None:
         """Look the king up on the Hub, and take the crown from it if the Hub no longer shows its
-        repository: why it was vacated, or None when there is no king or it is still there.
-        `hub.HubUnreachable` when the Hub does not answer: a king is never dethroned on silence."""
+        repository (or does not answer): why it was vacated, or None when there is no king or it
+        is still there."""
         from vector_orchestrator.ids import SubmissionRef
         from vector_orchestrator.store.writer import store_lock
 
@@ -349,9 +338,7 @@ class VectorLane:
             return None
         try:
             hub.inspect(king.repo, king.revision, self.shape, token=self.hub_token)
-        except hub.HubUnreachable:
-            raise
-        except hub.NotVisible as exc:
+        except hub.NotVisible as exc:  # HubUnreachable too
             reason = f"the king's repository is gone: {exc}"
         except hub.NotASubmission:
             return None  # what a pinned revision holds cannot change; it was admitted once
@@ -387,11 +374,7 @@ class VectorLane:
 
         self.publish_queue(self.queue())
         self.publish_champions()
-        try:
-            vacated = self.check_king()
-        except hub.HubUnreachable as exc:
-            return Progress(LANE, FAILED, f"cannot check the king: {exc}")
-        if vacated:
+        if self.check_king():
             self.publish_champions()
         queue = self.queue()
         if not queue:
@@ -405,8 +388,6 @@ class VectorLane:
                 result = self.duel(entry, chain)
             except seed_.NotYet as exc:
                 return Progress(LANE, WAITING, str(exc))
-            except hub.HubUnreachable as exc:
-                return Progress(LANE, FAILED, f"cannot look {entry.entry} up: {exc}")
             except CrownMoved as exc:
                 # The king changed under us; the entry is still queued and duels the new one next.
                 return Progress(LANE, WAITING, f"the crown moved, duelling again: {exc}")
@@ -426,7 +407,7 @@ class VectorLane:
             self.publish_queue(self.queue())
             self.publish_champions()
             return Progress(LANE, WORKED, detail, record)
-        return Progress(LANE, WAITING, "; ".join(passed))
+        return Progress(LANE, IDLE, "; ".join(passed))
 
     def publish_queue(self, queue: list[Entry]) -> None:
         """The waiting entries into the store's `queue.json`, as the dashboard shows them; pushed

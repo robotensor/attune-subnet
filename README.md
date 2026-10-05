@@ -37,17 +37,15 @@ demonstration of a task and must complete the same task in a different scene.
 
 The Hub is checked when an entry's turn comes, not when it is queued.
 
-- **Challenger missing.** If the Hub doesn't show the challenger's repo (deleted, private, or the
-  revision is gone), the validator skips it and duels the next entry in the queue. Inside a short
-  window after its commitment, the entry keeps its place, so you can make a private repo public
-  after committing. After the window it is dropped as `missing`, and the hotkey's one submission
-  is used up.
+- **Challenger missing.** If the Hub doesn't show the challenger's repo when its turn comes
+  (deleted, still private, or the revision is gone), it is dropped as `missing` and the validator
+  duels the next entry in the queue. The hotkey's one submission is used up.
 - **King missing.** Before every duel, the validator checks that the king's repo is still on the
   Hub. If it is gone, the king is dethroned without a duel (a `vacate` record in the result store)
   and the next entry takes the empty throne. The dethroned king's champion place stays, but its
   share of the emission is **burned**.
-- **Hub unreachable.** If the Hub doesn't answer at all, nothing is decided: no entry is skipped
-  and no king is dethroned.
+- **Hub unreachable.** A Hub that doesn't answer counts as a missing repo, for the challenger and
+  for the king alike.
 
 Submissions are weights only. Nothing a miner uploads is executed or unpickled: the safetensors
 header is checked against the pinned architecture before any tensor is read. Weights that don't
@@ -77,8 +75,9 @@ robotensor miner submit --dir submission/ --repo <you>/vector-mine \
     --network finney --netuid <N> --wallet.name miner --wallet.hotkey default
 ```
 
-`submit` uploads to a private repo, commits on chain, then makes the repo public. The earliest
-commitment of a given set of weights wins, so commit before you publish. Keep the repo up while you
+`submit` uploads to a private repo, commits on chain, then makes the repo public right away. The
+earliest commitment of a given set of weights wins, so commit before you publish, but don't leave
+the repo private: a repo the validator can't see at its turn is dropped as missing. Keep the repo up while you
 hold a place: a king whose repo is gone is dethroned and its share is burned.
 
 Check your entry with:

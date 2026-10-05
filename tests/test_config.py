@@ -38,11 +38,7 @@ def test_a_host_config_loads_and_the_rest_is_fixed(tmp_path):
     assert cfg.weights_interval_blocks == 360
     vector = cfg.vector
     assert vector.simulator_root == "/checkout/RoboTwin-Vector" and vector.mirror == ""
-    assert (vector.workers, vector.policy_kwargs, vector.private_window_blocks) == (
-        1,
-        {"device": "cuda:0"},
-        300,
-    )
+    assert (vector.workers, vector.policy_kwargs) == (1, {"device": "cuda:0"})
 
 
 def test_data_is_kept_beside_the_config_or_in_var_name_for_one_in_config(tmp_path):
@@ -71,7 +67,7 @@ def test_a_host_sets_how_many_units_each_of_its_gpus_runs(tmp_path):
 
 def test_a_local_chain_counts_more_blocks(tmp_path):
     cfg = load(write(tmp_path, GOOD.replace('"test"', '"ws://127.0.0.1:9944"')))
-    assert cfg.weights_interval_blocks == 100 and cfg.vector.private_window_blocks == 1200
+    assert cfg.weights_interval_blocks == 100
 
 
 @pytest.mark.parametrize(

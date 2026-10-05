@@ -9,9 +9,9 @@
     status   your hotkey's commitment on chain, and what the Hub shows for it
 
 Order matters for copy protection: upload to a PRIVATE repository, commit the sha on chain, then
-make the repository public. The validator queues a commitment as soon as it reads it and looks the
-repository up on the Hub only when its turn comes: a repository still private after a short window,
-or gone, is skipped and the next entry duels instead. Weights byte-identical to an earlier
+make the repository public - at once: the validator queues a commitment as soon as it reads it and
+looks the repository up on the Hub when its turn comes, and a repository it cannot see then (still
+private, gone, or the Hub not answering) is dropped as missing and the next entry duels instead. Weights byte-identical to an earlier
 commitment's are refused as a duplicate, and the earlier commitment keeps them, so whoever commits
 first owns the weights.
 
@@ -231,7 +231,7 @@ def add_subcommands(sub: Any) -> None:
     submit.add_argument(
         "--keep-private",
         action="store_true",
-        help="leave the repository private; the validator waits a while, then refuses it",
+        help="leave the repository private; the validator drops it as missing at its turn",
     )
     _chain_args(submit)
     submit.add_argument("--wallet.name", dest="wallet_name", required=True)

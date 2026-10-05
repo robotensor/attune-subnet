@@ -15,7 +15,7 @@
 
 Only what differs between hosts is here. Everything else is fixed in code: each competition's share
 of the emission, the data directory (`var/<config name>/` beside `config/`, or `var/` beside a
-config elsewhere), the weights interval and private window (per network) and the device.
+config elsewhere), the weights interval and Horizon's private window (per network) and the device.
 A key this build does not know is refused, with its name.
 """
 
@@ -58,8 +58,6 @@ class VectorConfig(LaneConfig):
     store: Path = Path()
     run_dir: Path = Path()
     cache: Path = Path()
-    #: How long a commitment whose repository the Hub will not show yet (still private) waits.
-    private_window_blocks: int = 300
     #: Units run at once on each GPU of the lane's lease, each a simulator and a policy server:
     #: as many as one card's memory holds (one unit alone took up to 34 GB on 2026-09-29).
     workers: int = 1
@@ -181,7 +179,6 @@ def _vector(
         store=data / "vector" / "store",
         run_dir=data / "vector" / "runs",
         cache=data / "vector" / "cache",
-        private_window_blocks=1200 if local(network) else 300,
     )
 
 

@@ -64,7 +64,6 @@ def lane(tmp_path):
         policy_python="python",
         simulator_python="python",
         simulator_root="/checkout/RoboTwin-Vector",
-        private_window_blocks=10,
     )
     return VectorLane(cfg, State(tmp_path / "state"))
 
@@ -414,27 +413,9 @@ def test_a_challenger_the_hub_does_not_show_is_skipped_for_the_next(lane, hub_of
     assert not lane.queue()
 
 
-def test_a_challenger_inside_its_private_window_keeps_its_place(lane, hub_of, monkeypatch):
-    """Committed at 995 with the head at 1000 and a window of 10: not public yet, it is passed over
-    but stays queued, and duels once the Hub shows it."""
-    from robotensor.lanes.base import WAITING, WORKED
-
-    hub_of({})
-    lane.intake([c("hk1", "m/one", A, 995)], 1000)
-    asked = []
-    monkeypatch.setattr(lane.engine, "run", genesis_run(asked))
-
-    assert lane.step(chain=FakeChain()).outcome == WAITING
-    assert statuses(lane) == {"hk1": "queued"} and not asked
-
-    hub_of({f"m/one@{A}": {"model.safetensors": "w1"}})
-    assert lane.step(chain=FakeChain()).outcome == WORKED
-    assert statuses(lane) == {"hk1": "crowned"}
-
-
-def test_a_hub_that_does_not_answer_decides_nothing(lane, monkeypatch):
+def test_a_hub_that_does_not_answer_is_a_missing_challenger(lane, monkeypatch):
     from robotensor import hub
-    from robotensor.lanes.base import FAILED
+    from robotensor.lanes.base import IDLE
 
     def down(*a, **kw):
         raise hub.HubUnreachable("503")
@@ -442,8 +423,8 @@ def test_a_hub_that_does_not_answer_decides_nothing(lane, monkeypatch):
     monkeypatch.setattr(hub, "inspect", down)
     lane.intake([c("hk1", "m/one", A, 10)], 30)
     progress = lane.step(chain=FakeChain())
-    assert progress.outcome == FAILED and "503" in progress.detail
-    assert statuses(lane) == {"hk1": "queued"}
+    assert progress.outcome == IDLE and "503" in progress.detail
+    assert statuses(lane) == {"hk1": "missing"} and not lane.queue()
 
 
 def test_weights_that_are_not_the_committed_digest_are_refused_at_their_turn(lane, hub_of):
@@ -525,9 +506,8 @@ def test_a_king_still_on_the_hub_keeps_the_crown(lane, hub_of):
     assert lane.engine.store.head()["king"]["repo"] == "m/one"
 
 
-def test_a_king_is_never_vacated_when_the_hub_does_not_answer(lane, monkeypatch):
+def test_a_king_is_vacated_when_the_hub_does_not_answer(lane, monkeypatch):
     from robotensor import hub
-    from robotensor.lanes.base import FAILED
 
     crown(lane, "m/one", A)
 
@@ -535,5 +515,5 @@ def test_a_king_is_never_vacated_when_the_hub_does_not_answer(lane, monkeypatch)
         raise hub.HubUnreachable("timeout")
 
     monkeypatch.setattr(hub, "inspect", down)
-    assert lane.step(chain=FakeChain()).outcome == FAILED
-    assert lane.engine.store.head()["king"]["repo"] == "m/one"
+    assert "timeout" in lane.check_king()
+    assert lane.engine.store.head()["king"] is None

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/header.png" alt="Robotensor Subnet: Bittensor subnet for robot foundation models" width="100%">
+  <img src="assets/header.png" alt="Robotensor Subnet: the open frontier for adaptive robot intelligence" width="100%">
 </p>
 
 <p align="center">

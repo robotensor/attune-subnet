@@ -13,8 +13,9 @@ metadata) are a `duplicate` - the earliest commitment keeps them. Otherwise the 
 one commitment per hotkey.
 
 **Duels.** The queue is served oldest commitment first; the oldest takes an empty throne by
-genesis, scored on its own units. Each duel is seeded from a block after the challenger's
-commitment (`protocol.seed`) and run by `Orchestrator.run`, which publishes a record: the crown
+genesis, scored on its own units. Each duel is seeded from the chain's finalized head, which must
+come after the challenger's commitment (`protocol.seed`), and run by `Orchestrator.run`, which
+publishes a record: the crown
 moves only when the challenger beats the king by the margin and the paired sign test says it is no
 accident. The queue is written to the store (`queue.json`) for the dashboard, and the orchestrator
 writes the duel's own progress beside it (`running.json`).
@@ -225,8 +226,8 @@ class VectorLane:
         return bool((self.engine.store.head() or {}).get("king"))
 
     def duel(self, entry: Entry, chain: Any) -> dict[str, Any]:
-        """Duel `entry` against the king, seeded from a block after its commitment. Raises
-        `seed.NotYet` when the chain has not moved far enough, and the orchestrator's
+        """Duel `entry` against the king, seeded from the finalized head, which must come after its
+        commitment. Raises `seed.NotYet` when finality has not passed the commitment yet, and the orchestrator's
         `HarnessUnavailable`/`DuelFailed` when the harness cannot run it (the entry stays queued)."""
         from vector_orchestrator.duel.orchestrate import CrownMoved, DuelRequest
         from vector_orchestrator.ids import SubmissionRef
@@ -241,8 +242,9 @@ class VectorLane:
                 record.update(status="duelled", reason="already holds the crown")
                 self.state.save()
                 return {"status": "skipped", "reason": "already holds the crown"}
-            block = seed_.seed_block(chain.block(), entry.commit_block)
-            seed = seed_.Seed(block, seed_.normalize_hash(chain.block_hash(block)))
+            finalized, finalized_hash = chain.finalized()
+            block = seed_.seed_block(finalized, entry.commit_block)
+            seed = seed_.Seed(block, seed_.normalize_hash(finalized_hash))
             # A duel resumed after a restart keeps its request (the same seed and block).
             request = record.get("request")
             if request and request.get("king") == (king.as_dict() if king else None):

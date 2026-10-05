@@ -172,11 +172,16 @@ def test_a_step_reports_the_engines_failure_rather_than_raising_it(lane, monkeyp
 
 
 class FakeChain:
+    """A head at 1000 whose finalized head is 997."""
+
     def block(self):
         return 1000
 
     def block_hash(self, block):
         return "0x" + "ab" * 32
+
+    def finalized(self):
+        return 997, "0x" + "CD" * 32
 
 
 def test_an_empty_queue_leaves_the_throne_waiting_and_publishes_an_empty_queue(lane):
@@ -214,6 +219,8 @@ def test_the_oldest_entry_takes_the_empty_throne_and_the_queue_is_published(lane
     assert progress.outcome == WORKED
     (req,) = asked
     assert req.king is None and req.challenger.repo == "m/one" and req.kind == "genesis"
+    # Seeded from the finalized head and the hash read with it, not from a block behind the head.
+    assert (req.seed_block, req.seed_block_hash) == (997, "0x" + "cd" * 32)
     entries = lane.state.lane("vector")["entries"]
     assert {r["hotkey"]: r["status"] for r in entries.values()} == {
         "hk1": "crowned",

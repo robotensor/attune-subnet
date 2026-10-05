@@ -47,10 +47,10 @@ def test_what_is_not_a_vector_commitment_does_not_parse(data):
         commitment.parse(data)
 
 
-def test_the_seed_block_comes_after_the_commitment_and_behind_the_head():
-    assert seed.seed_block(100, 90) == 97
+def test_the_seed_block_is_the_finalized_head_once_it_is_past_the_commitment():
+    assert seed.seed_block(97, 90) == 97
     with pytest.raises(seed.NotYet):
-        seed.seed_block(92, 90)  # 89 is not after 90
+        seed.seed_block(90, 90)  # the commitment's own block is not after it
     assert seed.normalize_hash("AB" * 32) == "0x" + "ab" * 32
     with pytest.raises(ValueError):
         seed.normalize_hash("0x1234")

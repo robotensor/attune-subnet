@@ -122,14 +122,62 @@ def test_copied_weights_are_a_duplicate_and_the_earliest_commitment_keeps_them(l
     assert [r["status"] for r in entries.values() if r["hotkey"] == "copier"] == ["duplicate"]
 
 
-def test_a_new_commitment_supersedes_the_hotkeys_waiting_entry(lane):
+def test_a_hotkey_makes_one_submission_and_a_later_commitment_is_refused(lane):
     lane.intake(
         [c("hk1", "m/one", A, 10)], 30, api=FakeHub({f"m/one@{A}": {"model.safetensors": "w1"}})
     )
-    lane.intake(
+    (later,) = lane.intake(
         [c("hk1", "m/one", C, 40)], 50, api=FakeHub({f"m/one@{C}": {"model.safetensors": "w3"}})
     )
-    assert [e.revision for e in lane.queue()] == [C]
+    assert later.status == "refused" and later.revision == C
+    entries = lane.state.lane("vector")["entries"]
+    assert "one submission" in entries[later.key]["reason"]
+    assert [e.revision for e in lane.queue()] == [A], "the first submission keeps its place"
+
+
+def test_the_one_submission_stays_spent_after_its_duel_won_or_lost(lane):
+    lane.intake(
+        [c("hk1", "m/one", A, 10)], 30, api=FakeHub({f"m/one@{A}": {"model.safetensors": "w1"}})
+    )
+    (first,) = lane.queue()
+    for settled in ("duelled", "crowned", "void", "refused"):
+        lane.state.lane("vector")["entries"][first.key]["status"] = settled
+        (again,) = lane.intake(
+            [c("hk1", "m/one", B, 40 + len(settled))],
+            60,
+            api=FakeHub({f"m/one@{B}": {"model.safetensors": "w2"}}),
+        )
+        assert again.status == "refused", settled
+        del lane.state.lane("vector")["entries"][again.key]
+
+
+def test_a_commitment_that_never_reached_the_queue_uses_nothing_up(lane):
+    lane.intake(
+        [c("hk1", "m/one", A, 10)],
+        30,
+        api=FakeHub({f"m/one@{A}": {"model.safetensors": "w1", "run.py": None}}),
+    )
+    assert lane.state.lane("vector")["entries"]
+    (fixed,) = lane.intake(
+        [c("hk1", "m/one", B, 40)], 50, api=FakeHub({f"m/one@{B}": {"model.safetensors": "w2"}})
+    )
+    assert fixed.status == "queued"
+
+
+def test_a_newer_commitment_replaces_one_still_waiting_for_the_hub(lane):
+    lane.intake([c("hk1", "m/one", A, 10)], 12, api=FakeHub({}))
+    (queued,) = [
+        e
+        for e in lane.intake(
+            [c("hk1", "m/one", C, 14)],
+            16,
+            api=FakeHub({f"m/one@{C}": {"model.safetensors": "w3"}}),
+        )
+        if e.revision == C
+    ]
+    assert queued.status == "queued"
+    statuses = {r["revision"]: r["status"] for r in lane.state.lane("vector")["entries"].values()}
+    assert statuses == {A: "superseded", C: "queued"}
 
 
 def test_a_settled_entry_is_not_taken_in_again(lane):

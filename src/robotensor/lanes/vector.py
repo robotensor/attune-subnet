@@ -9,8 +9,13 @@ looked up on the Hub (`hub.inspect`): a repository holding anything but the weig
 refused; one the Hub does not show yet (still private) waits `private_window_blocks` and is then
 refused; weights byte-identical to an earlier commitment's (same sha256, from the Hub's LFS
 metadata) are a `duplicate` - the earliest commitment keeps them. Otherwise the commitment is
-`queued`. A hotkey's new commitment supersedes its entry still waiting in the queue: the chain keeps
-one commitment per hotkey.
+`queued`.
+
+**One submission per hotkey.** A hotkey's first commitment to be queued is its only one: from then
+on, whatever it commits is `refused` - while that entry waits, during its duel, and after it, won
+or lost. A commitment that never reached the queue (refused by the Hub check, a duplicate, still
+waiting for the Hub) uses nothing up, and a newer commitment from the same hotkey replaces one still
+waiting for the Hub: the chain keeps one commitment per hotkey.
 
 **Duels.** The queue is served oldest commitment first; the oldest takes an empty throne by
 genesis, scored on its own units. Each duel is seeded from the chain's finalized head, which must
@@ -49,6 +54,8 @@ from .base import FAILED, IDLE, WAITING, WORKED, Award, Progress
 log = logging.getLogger(__name__)
 
 LANE = "vector"
+#: An entry that reached the queue: its hotkey has made its one submission.
+SUBMITTED = (QUEUED, "duelled", "crowned", "void")
 #: `champions.json`'s layout.
 CHAMPIONS_SCHEMA = 1
 
@@ -160,6 +167,15 @@ class VectorLane:
                 "status": PENDING,
                 "reason": "",
             }
+            spent = self._submission_of(c.hotkey, besides=key)
+            if spent is not None:
+                record.update(
+                    status="refused",
+                    reason=f"this hotkey has made its one submission ({spent})",
+                )
+                entries[key] = record
+                changed.append(self._entry(key, record))
+                continue
             try:
                 found = hub.inspect(
                     sub.repo, sub.revision, self.shape, api=api, token=self.hub_token
@@ -183,20 +199,31 @@ class VectorLane:
                 record.update(status="duplicate", reason=f"the same weights as {owner}")
             else:
                 by_weights[found.weights_sha256] = key
-                # The chain keeps one commitment per hotkey: its older entry still waiting is gone.
+                # The chain keeps one commitment per hotkey: its older entry still waiting for the
+                # Hub is gone.
                 for other_key, other in entries.items():
                     if (
                         other_key != key
                         and other["hotkey"] == c.hotkey
-                        and other["status"] in (PENDING, QUEUED)
+                        and other["status"] == PENDING
                     ):
                         other.update(status="superseded", reason=f"replaced by {key}")
-                record.update(status=QUEUED, reason="")
+                record.update(status=QUEUED, reason="", submitted=True)
             entries[key] = record
             changed.append(self._entry(key, record))
         if changed:
             self.state.save()
         return changed
+
+    def _submission_of(self, hotkey: str, *, besides: str) -> str | None:
+        """The key of the submission `hotkey` has made, other than `besides`: an entry that reached
+        the queue, whatever became of it. None while the hotkey has made none."""
+        for key, record in self.state.lane(LANE)["entries"].items():
+            if key == besides or record["hotkey"] != hotkey:
+                continue
+            if record.get("submitted") or record["status"] in SUBMITTED:
+                return key
+        return None
 
     def queue(self) -> list[Entry]:
         """The entries waiting for a duel, oldest commitment first. The one being duelled is still

@@ -9,6 +9,9 @@ Order matters for copy protection: upload to a PRIVATE repository, commit the sh
 make the repository public. The validator waits for a private repository for a while after the
 commitment; weights byte-identical to an earlier commitment's are refused as a duplicate, and the
 earlier commitment keeps them, so whoever commits first owns the weights.
+
+Each hotkey makes one submission: once a commitment of yours is queued, anything else the hotkey
+commits is refused, before its duel and after it. Check the weights (`check`) before you commit.
 """
 
 from __future__ import annotations

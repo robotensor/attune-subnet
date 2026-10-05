@@ -1,5 +1,7 @@
+"""`robotensor-miner`: check a `vector_v1.1` weights file, submit it and commit it on chain.
 
-    check    the file against the architecture the validator serves, as the validator checks it
+    check    model.safetensors, the only file a submission holds, against the architecture the
+             validator serves, as the validator checks it
     upload   model.safetensors (and an optional README) to your Hugging Face model repository;
              prints the commit sha to commit
     commit   write your repository, its revision and your weights' sha256 as your hotkey's
@@ -7,12 +9,16 @@
     status   your hotkey's commitment on chain, and what the Hub shows for it
 
 Order matters for copy protection: upload to a PRIVATE repository, commit the sha on chain, then
-make the repository public. The validator waits for a private repository for a while after the
-commitment; weights byte-identical to an earlier commitment's are refused as a duplicate, and the
-earlier commitment keeps them, so whoever commits first owns the weights.
+make the repository public. The validator queues a commitment as soon as it reads it and looks the
+repository up on the Hub only when its turn comes: a repository still private after a short window,
+or gone, is skipped and the next entry duels instead. Weights byte-identical to an earlier
+commitment's are refused as a duplicate, and the earlier commitment keeps them, so whoever commits
+first owns the weights.
 
 Each hotkey makes one submission: once a commitment of yours is queued, anything else the hotkey
-commits is refused, before its duel and after it. Check the weights (`check`) before you commit.
+commits is refused, before its duel and after it - even if its repository is then skipped. Check the
+weights (`check`) before you commit, and keep the repository up: a king whose repository is gone is
+dethroned, and its share of the emission is burned.
 """
 
 from __future__ import annotations
@@ -21,7 +27,6 @@ import argparse
 import hashlib
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any

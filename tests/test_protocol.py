@@ -54,7 +54,7 @@ def test_what_cannot_be_a_commitment_is_refused(repo, revision, digest):
     "data",
     [
         "",
-        "vector1:o/n@" + SHA,  # the prefix Vector used before it was named,
+        "old1:o/n@" + SHA,  # a prefix this build does not read,
         "vector:o/n@main",
         "vector:o/n",
         "vector:" + SHA,

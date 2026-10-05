@@ -1,32 +1,71 @@
-# robotensor-subnet
+<p align="center">
+  <img src="assets/header.png" alt="Robotensor Subnet: Bittensor subnet for robot foundation models" width="100%">
+</p>
 
-Bittensor subnet for robot foundation models. Miners fine-tune a policy and submit its weights;
-validators score submissions in simulation and set weights on chain.
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/bittensor-subnet-black.svg" alt="Bittensor subnet">
+</p>
 
-The first competition is **Robotensor Vector**: a Vector policy (`vector_v1.1`) is
-shown one demonstration of a task and must complete the same task in a different scene.
+<p align="center">
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#mining">Mining</a> ·
+  <a href="#validating">Validating</a> ·
+  <a href="#development">Development</a>
+</p>
+
+---
+
+**Robotensor** is a Bittensor subnet for robot foundation models. Miners submit policy weights;
+validators score them in simulation and set weights on chain.
+
+The first competition is **Robotensor Vector**: a policy (`vector_v1.1`) is shown one
+demonstration of a task and must complete the same task in a different scene.
 
 ## How it works
 
 | | |
 |---|---|
-| Submission | A Hugging Face model repo containing only `model.safetensors` (and an optional README) |
-| Commitment | `vector:<owner>/<repo>@<commit>.<digest>` on chain: the revision and the sha256 of `model.safetensors`, in base64url (`robotensor-miner commit` builds it; repo ids up to 49 characters). Weights that don't hash to the digest are refused. **One submission per hotkey**: once a commitment is queued, the hotkey's later ones are refused. |
-| Scoring | King of the hill. Each new submission duels the current king on 160 units (16 tasks × 10), seeded from the finalized block when the duel starts, which must come after the commitment. The challenger takes the crown when its average success rate beats the king's by 3+ points. |
-| Rewards | The lane's share goes to the 4 most recent champions: 40% / 30% / 20% / 10%, newest first. |
+| **Submission** | A Hugging Face model repo containing only `model.safetensors` (and an optional README). |
+| **Commitment** | `vector:<owner>/<repo>@<commit>.<digest>` on chain: the revision and the sha256 of `model.safetensors`, in base64url. `robotensor miner commit` builds it; repo ids can be up to 49 characters long. |
+| **Queue** | The validator queues a commitment as soon as it reads it from the chain, oldest first. **One submission per hotkey**: once a hotkey is queued, its later commitments are refused. |
+| **Scoring** | King of the hill. Each queued submission duels the current king on 160 units (16 tasks × 10), seeded from the finalized block when the duel starts. That block must come after the commitment. The challenger takes the crown when its average success rate beats the king's by 3+ points. |
+| **Rewards** | The lane's share goes to the 4 most recent champions: 40% / 30% / 20% / 10%, newest first. |
+
+### Missing repositories
+
+The Hub is checked when an entry's turn comes, not when it is queued.
+
+- **Challenger missing.** If the Hub doesn't show the challenger's repo (deleted, private, or the
+  revision is gone), the validator skips it and duels the next entry in the queue. Inside a short
+  window after its commitment, the entry keeps its place, so you can make a private repo public
+  after committing. After the window it is dropped as `missing`, and the hotkey's one submission
+  is used up.
+- **King missing.** Before every duel, the validator checks that the king's repo is still on the
+  Hub. If it is gone, the king is dethroned without a duel (a `vacate` record in the result store)
+  and the next entry takes the empty throne. The dethroned king's champion place stays, but its
+  share of the emission is **burned**.
+- **Hub unreachable.** If the Hub doesn't answer at all, nothing is decided: no entry is skipped
+  and no king is dethroned.
 
 Submissions are weights only. Nothing a miner uploads is executed or unpickled: the safetensors
-header is checked against the pinned architecture before any tensor is read.
+header is checked against the pinned architecture before any tensor is read. Weights that don't
+hash to the committed digest are refused. Weights identical to an earlier commitment's are refused
+as duplicates, and the earlier commitment keeps them.
 
 ## Components
 
 | Repo | Role |
 |---|---|
-| `robotensor-subnet` | Chain side: commitments, seeds, weights, validator loop, miner CLI |
+| [`robotensor-subnet`](https://github.com/robotensor/robotensor-subnet) | Chain side: commitments, queue, seeds, weights, validator loop, miner CLI |
 | [`vector-orchestrator`](https://github.com/robotensor/vector-orchestrator) | Duel engine, result store, `vector-runtime` and `vector-protocol` |
 | [`RoboTwin-Vector`](https://github.com/robotensor/RoboTwin-Vector) | RoboTwin 2.0 fork with the level gate and the benchmark harness |
 
 ## Mining
+
+A submission is a `vector_v1.1` weights file: `model.safetensors`, with exactly the tensors the
+architecture pins (`vector_runtime/vector_v1.1.json` in the orchestrator).
 
 ```bash
 pip install "robotensor[vector]"
@@ -39,8 +78,14 @@ robotensor miner submit --dir submission/ --repo <you>/vector-mine \
 ```
 
 `submit` uploads to a private repo, commits on chain, then makes the repo public. The earliest
-commitment of a given set of weights wins, so commit before publishing. Check your entry with
-`robotensor miner status --hotkey <ss58> --network finney --netuid <N>`.
+commitment of a given set of weights wins, so commit before you publish. Keep the repo up while you
+hold a place: a king whose repo is gone is dethroned and its share is burned.
+
+Check your entry with:
+
+```bash
+robotensor miner status --hotkey <ss58> --network finney --netuid <N>
+```
 
 ## Validating
 
@@ -82,7 +127,7 @@ export HF_TOKEN=...
 robotensor validator --config config/<network>.toml run
 ```
 
-`status`, `weights --dry-run` and `duel --challenger owner/name@sha` are available as well.
+`status`, `weights --dry-run` and `duel --challenger owner/name@sha` are also available.
 Interrupted duels resume from `var/<network>/`.
 
 For rented GPU pods (vast.ai, lium.io), `docker/build.sh` builds an image with all three
@@ -101,4 +146,4 @@ subtensor.
 
 ## License
 
-Apache-2.0
+[Apache-2.0](LICENSE)

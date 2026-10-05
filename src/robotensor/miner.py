@@ -2,18 +2,23 @@
     check    the file against the architecture the validator serves, as the validator checks it
     upload   model.safetensors (and an optional README) to your Hugging Face model repository;
              prints the commit sha to commit
-    commit   write `vector:<repo>@<sha>` as your hotkey's commitment on the subnet
+    commit   write your repository, its revision and your weights' sha256 as your hotkey's
+             commitment on the subnet (`vector:<repo>@<commit>.<digest>`)
     status   your hotkey's commitment on chain, and what the Hub shows for it
 
 Order matters for copy protection: upload to a PRIVATE repository, commit the sha on chain, then
 make the repository public. The validator waits for a private repository for a while after the
 commitment; weights byte-identical to an earlier commitment's are refused as a duplicate, and the
 earlier commitment keeps them, so whoever commits first owns the weights.
+
+Each hotkey makes one submission: once a commitment of yours is queued, anything else the hotkey
+commits is refused, before its duel and after it. Check the weights (`check`) before you commit.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
@@ -25,6 +30,15 @@ from . import hub
 from .protocol import commitment as commitment_
 
 DEFAULT_NETWORK = "test"
+
+
+def weights_digest(path: Path) -> str:
+    """The sha256 of the weights file, as the commitment names it."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -59,9 +73,15 @@ def cmd_upload(args: argparse.Namespace) -> int:
         private=args.private,
         readme=readme,
     )
+    digest = weights_digest(weights)
     print(
         json.dumps(
-            {"repo": args.repo, "revision": sha, "commitment": commitment_.encode(args.repo, sha)}
+            {
+                "repo": args.repo,
+                "revision": sha,
+                "digest": digest,
+                "commitment": commitment_.encode(args.repo, sha, digest),
+            }
         )
     )
     return 0
@@ -70,7 +90,7 @@ def cmd_upload(args: argparse.Namespace) -> int:
 def cmd_commit(args: argparse.Namespace) -> int:
     from . import chain as chain_
 
-    data = commitment_.encode(args.repo, args.revision)
+    data = commitment_.encode(args.repo, args.revision, args.digest)
     wallet = chain_.wallet(args.wallet_name, args.wallet_hotkey, args.wallet_path)
     chain = chain_.Chain(args.network, args.netuid)
     try:
@@ -95,7 +115,7 @@ def cmd_submit(args: argparse.Namespace) -> int:
     readme = Path(args.readme).read_text(encoding="utf-8") if args.readme else None
     token = os.environ.get("HF_TOKEN")
     sha = hub.upload_weights(args.repo, str(weights), token=token, private=True, readme=readme)
-    data = commitment_.encode(args.repo, sha)
+    data = commitment_.encode(args.repo, sha, weights_digest(weights))
     wallet = chain_.wallet(args.wallet_name, args.wallet_hotkey, args.wallet_path)
     chain = chain_.Chain(args.network, args.netuid)
     try:
@@ -145,6 +165,8 @@ def cmd_status(args: argparse.Namespace) -> int:
                 token=os.environ.get("HF_TOKEN"),
             )
             entry["weights_sha256"] = found.weights_sha256
+            entry["digest"] = sub.digest
+            entry["digest_matches"] = sub.digest == found.weights_sha256
         except Exception as exc:  # noqa: BLE001 - reported, not raised
             entry["problem"] = str(exc)
         out.append(entry)
@@ -182,6 +204,11 @@ def add_subcommands(sub: Any) -> None:
     commit = sub.add_parser("commit", help="commit repo@sha on chain for your hotkey")
     commit.add_argument("--repo", required=True)
     commit.add_argument("--revision", required=True, help="the 40-hex commit sha upload printed")
+    commit.add_argument(
+        "--digest",
+        required=True,
+        help="the sha256 of model.safetensors (check and upload print it)",
+    )
     _chain_args(commit)
     commit.add_argument("--wallet.name", dest="wallet_name", required=True)
     commit.add_argument("--wallet.hotkey", dest="wallet_hotkey", required=True)

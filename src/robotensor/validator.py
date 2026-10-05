@@ -26,7 +26,6 @@ from . import chain as chain_
 from . import supervisor
 from .config import Config, load
 from .lanes.vector import Entry, VectorLane
-from .protocol import seed as seed_
 from .protocol import weights as weights_
 from .state import State
 
@@ -126,7 +125,7 @@ def cmd_duel(args: argparse.Namespace, cfg: Config) -> int:
                 "hotkey": args.hotkey or "manual",
                 "repo": repo,
                 "revision": revision,
-                "commit_block": chain.block() - seed_.FINALITY - 1,
+                "commit_block": chain.finalized()[0] - 1,
                 "status": "queued",
                 "reason": "manual",
             },

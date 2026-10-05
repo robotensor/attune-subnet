@@ -7,6 +7,10 @@ the other.
 
 It holds a chain connection of its own (a websocket is not thread-safe, let alone process-shared),
 writes only its own lane's state document, and takes a GPU lease around each step.
+
+A lane whose step can take hours (a Vector duel) also offers `refresh(chain)`: the worker runs it
+every `REFRESH_S` on a thread and a chain connection of its own, so what the chain committed meanwhile
+reaches the lane - and the queue the dashboard shows - while the step is still running.
 """
 
 from __future__ import annotations
@@ -15,7 +19,9 @@ import argparse
 import logging
 import os
 import sys
+import threading
 import time
+from typing import Any
 
 from . import chain as chain_
 from . import compute
@@ -27,6 +33,8 @@ log = logging.getLogger("robotensor.worker")
 
 #: How long a worker waits before stepping again when there was nothing to do.
 IDLE_S = 30.0
+#: How often a lane that offers `refresh` takes in what the chain committed, beside its step.
+REFRESH_S = 60.0
 
 
 def hub_token() -> str | None:
@@ -56,11 +64,42 @@ def one_step(lane: Lane, chain: chain_.Chain, broker: compute.Broker) -> Progres
         return lane.step(chain)
 
 
+class Refresher(threading.Thread):
+    """`lane.refresh(chain)` every `interval_s`, on a chain connection of its own (a websocket is
+    not thread-safe). A failure is logged and the next tick tries again."""
+
+    def __init__(self, cfg: Config, lane: Any, interval_s: float = REFRESH_S) -> None:
+        super().__init__(name=f"robotensor-refresh-{lane.name}", daemon=True)
+        self.cfg = cfg
+        self.lane = lane
+        self.interval_s = interval_s
+        self.stop = threading.Event()
+
+    def run(self) -> None:
+        chain = None
+        while not self.stop.wait(self.interval_s):
+            try:
+                if chain is None:
+                    chain = chain_.Chain(self.cfg.network, self.cfg.netuid)
+                for entry in self.lane.refresh(chain):
+                    log.info("intake: %s from %s is %s", entry.entry, entry.hotkey, entry.status)
+            except Exception:  # noqa: BLE001 - logged; the next tick tries again
+                log.exception("%s: the refresh failed", self.lane.name)
+                if chain is not None:
+                    chain.close()
+                chain = None
+        if chain is not None:
+            chain.close()
+
+
 def run(cfg: Config, name: str, *, once: bool = False) -> int:
     state = State(cfg.state)
     lane = build(cfg, name, state)
     chain = chain_.Chain(cfg.network, cfg.netuid)
     broker = compute.Broker(cfg.state)
+    refresher = Refresher(cfg, lane) if hasattr(lane, "refresh") and not once else None
+    if refresher is not None:
+        refresher.start()
     try:
         while True:
             try:
@@ -76,6 +115,8 @@ def run(cfg: Config, name: str, *, once: bool = False) -> int:
     except KeyboardInterrupt:
         return 0
     finally:
+        if refresher is not None:
+            refresher.stop.set()
         chain.close()
 
 

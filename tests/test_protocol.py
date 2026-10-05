@@ -8,26 +8,46 @@ from robotensor.protocol.weights import Lane, weight_vector
 SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
-def test_a_commitment_round_trips():
-    data = commitment.encode("robotensor/vector-update1", SHA)
-    assert data == f"vector:robotensor/vector-update1@{SHA}"
+DIGEST = "ab" * 32
+
+
+def test_a_commitment_round_trips_with_its_weights_digest():
+    data = commitment.encode("robotensor/vector-update1", SHA, DIGEST)
+    # The revision's 20 bytes and the digest's 32, unpadded base64url.
+    assert (
+        data
+        == "vector:robotensor/vector-update1@ASNFZ4mrze8BI0VniavN7wEjRWc." + "q6ur" * 10 + "q6s"
+    )
     sub = commitment.parse(data)
-    assert (sub.lane, sub.repo, sub.revision) == ("vector", "robotensor/vector-update1", SHA)
+    assert (sub.lane, sub.repo, sub.revision, sub.digest) == (
+        "vector",
+        "robotensor/vector-update1",
+        SHA,
+        DIGEST,
+    )
     assert sub.entry == f"robotensor/vector-update1@{SHA}"
 
 
+def test_a_repository_id_of_49_characters_fits_the_chain():
+    assert len(commitment.encode("o/" + "x" * 47, SHA, DIGEST).encode()) == commitment.MAX_BYTES
+    with pytest.raises(commitment.CommitmentError, match="128"):
+        commitment.encode("o/" + "x" * 48, SHA, DIGEST)
+
+
 @pytest.mark.parametrize(
-    ("repo", "revision"),
+    ("repo", "revision", "digest"),
     [
-        ("robotensor/model", "main"),  # a branch can change after the block that orders the queue
-        ("robotensor/model", SHA[:12]),
-        ("not-a-repo", SHA),
-        ("o/" + "x" * 100, SHA),  # over the chain's 128 bytes
+        ("robotensor/model", "main", DIGEST),  # a branch can change after the block that orders it
+        ("robotensor/model", SHA[:12], DIGEST),
+        ("not-a-repo", SHA, DIGEST),
+        ("o/" + "x" * 100, SHA, DIGEST),  # over the chain's 128 bytes
+        ("robotensor/model", SHA, None),  # a Vector commitment names its weights
+        ("robotensor/model", SHA, DIGEST[:40]),
     ],
 )
-def test_what_cannot_be_a_commitment_is_refused(repo, revision):
+def test_what_cannot_be_a_commitment_is_refused(repo, revision, digest):
     with pytest.raises(commitment.CommitmentError):
-        commitment.encode(repo, revision)
+        commitment.encode(repo, revision, digest)
 
 
 @pytest.mark.parametrize(
@@ -40,6 +60,10 @@ def test_what_cannot_be_a_commitment_is_refused(repo, revision):
         "vector:" + SHA,
         "hello",
         "vector:o/n@" + SHA + "0",
+        "vector:o/n@" + SHA,  # the format before commitments named their weights
+        "vector:o/n@ASNFZ4mrze8BI0VniavN7wEjRWc",  # no digest
+        "vector:o/n@ASNFZ4mrze8BI0VniavN7wEjRWc." + "q6ur" * 10 + "qw",  # a digest one byte short
+        "vector:o/n@ASNFZ4mrze8BI0VniavN7wEjRWc." + "q6ur" * 10 + "q6t",  # not canonical base64
     ],
 )
 def test_what_is_not_a_vector_commitment_does_not_parse(data):
@@ -47,10 +71,10 @@ def test_what_is_not_a_vector_commitment_does_not_parse(data):
         commitment.parse(data)
 
 
-def test_the_seed_block_comes_after_the_commitment_and_behind_the_head():
-    assert seed.seed_block(100, 90) == 97
+def test_the_seed_block_is_the_finalized_head_once_it_is_past_the_commitment():
+    assert seed.seed_block(97, 90) == 97
     with pytest.raises(seed.NotYet):
-        seed.seed_block(92, 90)  # 89 is not after 90
+        seed.seed_block(90, 90)  # the commitment's own block is not after it
     assert seed.normalize_hash("AB" * 32) == "0x" + "ab" * 32
     with pytest.raises(ValueError):
         seed.normalize_hash("0x1234")
@@ -137,9 +161,10 @@ def test_a_split_that_is_not_a_partition_of_the_share_is_refused(bad):
 def test_both_competitions_commitments_are_read_from_one_storage():
     """One subnet, one commitment slot per hotkey: the prefix says which competition it entered,
     so a miner never has to say which netuid they meant."""
-    vector = commitment.parse(f"vector:o/n@{SHA}")
+    vector = commitment.parse(commitment.encode("o/n", SHA, DIGEST))
     horizon = commitment.parse(f"horizon:o/n@{SHA}")
 
     assert (vector.lane, horizon.lane) == ("vector", "horizon")
     assert vector.entry == horizon.entry
+    assert (vector.digest, horizon.digest) == (DIGEST, None)
     assert commitment.encode("o/n", SHA, lane="horizon") == f"horizon:o/n@{SHA}"

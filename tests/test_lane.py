@@ -1,5 +1,6 @@
 """The Vector lane's intake, against a fake Hub and the real orchestrator contract."""
 
+import hashlib
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +16,13 @@ from robotensor.state import State
 pytest.importorskip("vector_orchestrator")
 
 A, B, C = "a" * 40, "b" * 40, "c" * 40
+#: The weights each revision holds in these tests, by a label the fake Hub hashes to a digest.
+WEIGHTS = {A: "w1", B: "w2", C: "w3"}
+
+
+def digest(label):
+    """The sha256 the fake Hub reports for weights labelled `label`."""
+    return hashlib.sha256(label.encode()).hexdigest()
 
 
 class FakeHub:
@@ -36,7 +44,7 @@ class FakeHub:
             SimpleNamespace(
                 rfilename=name,
                 size=7,
-                lfs=SimpleNamespace(sha256=sha) if sha else None,
+                lfs=SimpleNamespace(sha256=digest(sha)) if sha else None,
             )
             for name, sha in files.items()
         ]
@@ -61,8 +69,11 @@ def lane(tmp_path):
     return VectorLane(cfg, State(tmp_path / "state"))
 
 
-def c(hotkey, repo, sha, block):
-    return Commitment(hotkey=hotkey, block=block, data=commitment.encode(repo, sha))
+def c(hotkey, repo, sha, block, weights=None):
+    """A commitment of `repo@sha` naming the weights labelled `weights` (by default the ones
+    `WEIGHTS` says that revision holds)."""
+    data = commitment.encode(repo, sha, digest(weights or WEIGHTS[sha]))
+    return Commitment(hotkey=hotkey, block=block, data=data)
 
 
 def test_new_commitments_are_queued_oldest_first(lane):
@@ -115,21 +126,71 @@ def test_copied_weights_are_a_duplicate_and_the_earliest_commitment_keeps_them(l
     hub = FakeHub(
         {f"m/orig@{A}": {"model.safetensors": "same"}, f"x/copy@{B}": {"model.safetensors": "same"}}
     )
-    lane.intake([c("copier", "x/copy", B, 12), c("author", "m/orig", A, 10)], 30, api=hub)
+    lane.intake(
+        [c("copier", "x/copy", B, 12, "same"), c("author", "m/orig", A, 10, "same")], 30, api=hub
+    )
     queued = lane.queue()
     assert [e.hotkey for e in queued] == ["author"]
     entries = lane.state.lane("vector")["entries"]
     assert [r["status"] for r in entries.values() if r["hotkey"] == "copier"] == ["duplicate"]
 
 
-def test_a_new_commitment_supersedes_the_hotkeys_waiting_entry(lane):
+def test_a_hotkey_makes_one_submission_and_a_later_commitment_is_refused(lane):
     lane.intake(
         [c("hk1", "m/one", A, 10)], 30, api=FakeHub({f"m/one@{A}": {"model.safetensors": "w1"}})
     )
-    lane.intake(
+    (later,) = lane.intake(
         [c("hk1", "m/one", C, 40)], 50, api=FakeHub({f"m/one@{C}": {"model.safetensors": "w3"}})
     )
-    assert [e.revision for e in lane.queue()] == [C]
+    assert later.status == "refused" and later.revision == C
+    entries = lane.state.lane("vector")["entries"]
+    assert "one submission" in entries[later.key]["reason"]
+    assert [e.revision for e in lane.queue()] == [A], "the first submission keeps its place"
+
+
+def test_the_one_submission_stays_spent_after_its_duel_won_or_lost(lane):
+    lane.intake(
+        [c("hk1", "m/one", A, 10)], 30, api=FakeHub({f"m/one@{A}": {"model.safetensors": "w1"}})
+    )
+    (first,) = lane.queue()
+    for settled in ("duelled", "crowned", "void", "refused"):
+        lane.state.lane("vector")["entries"][first.key]["status"] = settled
+        (again,) = lane.intake(
+            [c("hk1", "m/one", B, 40 + len(settled))],
+            60,
+            api=FakeHub({f"m/one@{B}": {"model.safetensors": "w2"}}),
+        )
+        assert again.status == "refused", settled
+        del lane.state.lane("vector")["entries"][again.key]
+
+
+def test_a_commitment_that_never_reached_the_queue_uses_nothing_up(lane):
+    lane.intake(
+        [c("hk1", "m/one", A, 10)],
+        30,
+        api=FakeHub({f"m/one@{A}": {"model.safetensors": "w1", "run.py": None}}),
+    )
+    assert lane.state.lane("vector")["entries"]
+    (fixed,) = lane.intake(
+        [c("hk1", "m/one", B, 40)], 50, api=FakeHub({f"m/one@{B}": {"model.safetensors": "w2"}})
+    )
+    assert fixed.status == "queued"
+
+
+def test_a_newer_commitment_replaces_one_still_waiting_for_the_hub(lane):
+    lane.intake([c("hk1", "m/one", A, 10)], 12, api=FakeHub({}))
+    (queued,) = [
+        e
+        for e in lane.intake(
+            [c("hk1", "m/one", C, 14)],
+            16,
+            api=FakeHub({f"m/one@{C}": {"model.safetensors": "w3"}}),
+        )
+        if e.revision == C
+    ]
+    assert queued.status == "queued"
+    statuses = {r["revision"]: r["status"] for r in lane.state.lane("vector")["entries"].values()}
+    assert statuses == {A: "superseded", C: "queued"}
 
 
 def test_a_settled_entry_is_not_taken_in_again(lane):
@@ -172,11 +233,16 @@ def test_a_step_reports_the_engines_failure_rather_than_raising_it(lane, monkeyp
 
 
 class FakeChain:
+    """A head at 1000 whose finalized head is 997."""
+
     def block(self):
         return 1000
 
     def block_hash(self, block):
         return "0x" + "ab" * 32
+
+    def finalized(self):
+        return 997, "0x" + "CD" * 32
 
 
 def test_an_empty_queue_leaves_the_throne_waiting_and_publishes_an_empty_queue(lane):
@@ -214,6 +280,8 @@ def test_the_oldest_entry_takes_the_empty_throne_and_the_queue_is_published(lane
     assert progress.outcome == WORKED
     (req,) = asked
     assert req.king is None and req.challenger.repo == "m/one" and req.kind == "genesis"
+    # Seeded from the finalized head and the hash read with it, not from a block behind the head.
+    assert (req.seed_block, req.seed_block_hash) == (997, "0x" + "cd" * 32)
     entries = lane.state.lane("vector")["entries"]
     assert {r["hotkey"]: r["status"] for r in entries.values()} == {
         "hk1": "crowned",
@@ -262,3 +330,95 @@ def test_a_seed_block_that_is_not_final_yet_is_waiting_not_a_failure(lane, monke
     progress = lane.step(chain=None)
 
     assert progress.outcome == WAITING and "3 blocks to go" in progress.detail
+
+
+def test_the_queue_names_each_entrys_hotkey(lane):
+    lane.intake(
+        [c("hk1", "m/one", A, 10)], 30, api=FakeHub({f"m/one@{A}": {"model.safetensors": "w1"}})
+    )
+    lane.publish_queue(lane.queue())
+    (entry,) = json.loads(lane.engine.store.queue_path().read_text())["entries"]
+    assert (entry["repo"], entry["hotkey"], entry["block"]) == ("m/one", "hk1", 10)
+
+
+def test_the_champions_paid_now_are_published_with_their_part_of_the_lane(lane, monkeypatch):
+    """The newest four a miner committed, 40/30/20/10; what no entry committed holds no place, and
+    with fewer than four the filled places share the whole lane."""
+    from vector_orchestrator.ids import submission_key
+
+    lane.intake(
+        [c("hk1", "m/one", A, 10), c("hk2", "m/two", B, 20)],
+        30,
+        api=FakeHub(
+            {f"m/one@{A}": {"model.safetensors": "w1"}, f"m/two@{B}": {"model.safetensors": "w2"}}
+        ),
+    )
+    one = {"key": submission_key("m/one", A), "repo": "m/one", "revision": A}
+    two = {"key": submission_key("m/two", B), "repo": "m/two", "revision": B}
+    stranger = {"key": submission_key("m/other", C), "repo": "m/other", "revision": C}
+    records = [
+        {"kind": "genesis", "king": stranger, "event_id": "e0", "finished_at": "t0"},
+        {"kind": "duel", "king": stranger, "challenger": one, "dethroned": True, "event_id": "e1",
+         "finished_at": "t1"},
+        {"kind": "duel", "king": one, "challenger": two, "dethroned": True, "event_id": "e2",
+         "finished_at": "t2"},
+    ]  # fmt: skip
+    monkeypatch.setattr(lane.engine.store, "iter_index", lambda: iter(records))
+
+    lane.publish_champions()
+
+    doc = json.loads(lane.engine.store.champions_path().read_text())
+    assert doc["schema"] == 1 and doc["lane_share"] == 0.3
+    assert doc["split"] == [0.4, 0.3, 0.2, 0.1]
+    assert [(p["place"], p["repo"], p["hotkey"], p["event_id"]) for p in doc["champions"]] == [
+        (1, "m/two", "hk2", "e2"),
+        (2, "m/one", "hk1", "e1"),
+    ]
+    assert [round(p["share"], 6) for p in doc["champions"]] == [
+        round(0.4 / 0.7, 6),
+        round(0.3 / 0.7, 6),
+    ]
+    assert doc["champions"][0]["key"] == two["key"] and doc["champions"][0]["crowned_at"] == "t2"
+
+
+def test_an_empty_store_publishes_no_champions(lane):
+    lane.publish_champions()
+    assert json.loads(lane.engine.store.champions_path().read_text())["champions"] == []
+
+
+def test_a_refresh_takes_new_commitments_in_and_republishes_the_queue(lane, monkeypatch):
+    from robotensor import hub
+
+    fake = FakeHub({f"m/one@{A}": {"model.safetensors": "w1"}})
+    real = hub.inspect
+    monkeypatch.setattr(hub, "inspect", lambda *a, **kw: real(*a, **{**kw, "api": fake}))
+
+    class Chain:
+        def commitments(self):
+            return [c("hk1", "m/one", A, 10)]
+
+        def block(self):
+            return 30
+
+    (changed,) = lane.refresh(Chain())
+
+    assert changed.status == "queued"
+    queue = json.loads(lane.engine.store.queue_path().read_text())
+    assert [e["hotkey"] for e in queue["entries"]] == ["hk1"]
+
+
+def test_weights_that_are_not_the_committed_digest_are_refused(lane):
+    """The commitment pins the weights: the same repository and revision holding other weights than
+    the digest says is refused, and uses nothing up."""
+    (entry,) = lane.intake(
+        [c("hk1", "m/one", A, 10, "something-else")],
+        30,
+        api=FakeHub({f"m/one@{A}": {"model.safetensors": "w1"}}),
+    )
+    assert entry.status == "refused"
+    reason = lane.state.lane("vector")["entries"][entry.key]["reason"]
+    assert digest("something-else") in reason and digest("w1") in reason
+    (fixed,) = lane.intake(
+        [c("hk1", "m/one", B, 40)], 50, api=FakeHub({f"m/one@{B}": {"model.safetensors": "w2"}})
+    )
+    assert fixed.status == "queued"

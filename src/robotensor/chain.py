@@ -8,7 +8,8 @@ Everything here is a thin call to `Subtensor`:
 - `commitments()`: every hotkey's current commitment on the subnet with the block it was made at,
   from one query of the `Commitments.CommitmentOf` storage map. The chain keeps one commitment per
   hotkey; a new one replaces it and resets its block.
-- `block()`, `block_hash(n)`, `uids()`: the head, a block's hash, and the metagraph's hotkeys.
+- `block()`, `block_hash(n)`, `finalized()`, `uids()`: the head, a block's hash, the finalized
+  head and its hash, and the metagraph's hotkeys.
 - `commit(wallet, data)` and `set_weights(wallet, weights)`: the two writes.
 
 `Subtensor` holds a websocket that is not safe to share between threads, so a `Chain` opens its own
@@ -59,6 +60,14 @@ class Chain:
         if not value:
             raise ChainError(f"the chain has no hash for block {block}")
         return str(value)
+
+    def finalized(self) -> tuple[int, str]:
+        """The finalized head: its number and its hash, read together so they name one block."""
+        substrate = self.subtensor.substrate
+        value = substrate.get_chain_finalised_head()
+        if not value:
+            raise ChainError("the chain reported no finalized head")
+        return int(substrate.get_block_number(value)), str(value)
 
     def commitments(self) -> list[Commitment]:
         """Every hotkey's commitment on the subnet, with the block it was made at, oldest first."""

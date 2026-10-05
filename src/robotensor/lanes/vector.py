@@ -15,10 +15,9 @@ one commitment per hotkey.
 **Duels.** The queue is served oldest commitment first; the oldest takes an empty throne by
 genesis, scored on its own units. Each duel is seeded from the chain's finalized head, which must
 come after the challenger's commitment (`protocol.seed`), and run by `Orchestrator.run`, which
-publishes a record: the crown
-moves only when the challenger beats the king by the margin and the paired sign test says it is no
-accident. The queue is written to the store (`queue.json`) for the dashboard, and the orchestrator
-writes the duel's own progress beside it (`running.json`).
+publishes a record: the crown moves only when the challenger's average success rate beats the
+king's by the margin. The queue is written to the store (`queue.json`) for the dashboard, and the
+orchestrator writes the duel's own progress beside it (`running.json`).
 
 **Champions.** The lane's champions are read back from the store: every record that crowned a
 model, newest first, each mapped to the hotkey that committed it. The ones paid now - the newest

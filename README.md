@@ -12,7 +12,7 @@ shown one demonstration of a task and must complete the same task in a different
 |---|---|
 | Submission | A Hugging Face model repo containing only `model.safetensors` (and an optional README) |
 | Commitment | `vector:<owner>/<repo>@<sha>` on chain |
-| Scoring | King of the hill. Each new submission duels the current king on 160 units (16 tasks × 10), seeded from a block after the commitment. The challenger takes the crown when it wins by 3+ points and a paired sign test gives p ≤ 0.05. |
+| Scoring | King of the hill. Each new submission duels the current king on 160 units (16 tasks × 10), seeded from the finalized block when the duel starts, which must come after the commitment. The challenger takes the crown when its average success rate beats the king's by 3+ points. |
 | Rewards | The lane's share goes to the 4 most recent champions: 40% / 30% / 20% / 10%, newest first. |
 
 Submissions are weights only. Nothing a miner uploads is executed or unpickled: the safetensors

@@ -39,7 +39,7 @@ for src in "${ROBOTWIN}" "${ORCHESTRATOR}" "${SUBNET}"; do
     tar -C "${src}" -cf - .git | tar -C "${CONTEXT}/${name}" -xf -
 done
 
-args=(-f "${CONTEXT}/robotensor-subnet/docker/Dockerfile" -t "${IMAGE}:${TAG}")
+args=(-f "${CONTEXT}/$(basename "${SUBNET}")/docker/Dockerfile" -t "${IMAGE}:${TAG}")
 [[ -n "${GPU_PATH:-}" ]] && args+=(--build-arg "GPU_PATH=${GPU_PATH}")
 [[ -n "${CUDA_ARCH:-}" ]] && args+=(--build-arg "CUDA_ARCH=${CUDA_ARCH}")
 if [[ -d "${ASSETS}/objects" && -d "${ASSETS}/embodiments" && -d "${ASSETS}/background_texture" ]]; then

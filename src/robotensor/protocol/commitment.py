@@ -122,6 +122,6 @@ def parse(data: str) -> Submission:
     if not dot or revision is None or digest is None:
         raise CommitmentError(
             f"{data[:80]!r} is not vector:<owner>/<name>@<commit>.<digest>: a Vector commitment "
-            "names the weights' sha256 too (`robotensor-miner commit --digest`)"
+            "names the weights' sha256 too (`attune miner commit --digest`)"
         )
     return Submission(lane=lane, repo=repo, revision=revision, digest=digest)

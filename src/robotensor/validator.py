@@ -1,4 +1,4 @@
-"""`robotensor-validator`: read commitments, run the competitions, set weights.
+"""`attune validator`: read commitments, run the competitions, set weights.
 
     run      every configured competition, each in a worker process of its own (`supervisor`),
              with a weights thread beside them: one duel can take hours and a validator must stay
@@ -169,7 +169,7 @@ def cmd_status(args: argparse.Namespace, cfg: Config) -> int:
 
 
 def add_subcommands(sub: Any) -> None:
-    """Hang a validator's verbs off `sub`, so `robotensor validator ...` and the standalone
+    """Hang a validator's verbs off `sub`, so `attune validator ...` and the standalone
     command are the same parser rather than two that drift."""
     run = sub.add_parser("run", help="the validator loop")
     run.add_argument("--once", action="store_true", help="one step, then exit")

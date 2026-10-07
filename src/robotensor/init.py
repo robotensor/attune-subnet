@@ -1,20 +1,20 @@
-"""`robotensor init`: a working directory, and a config that only needs your wallet filled in.
+"""`attune init`: a working directory, and a config that only needs your wallet filled in.
 
 What is fiddly about running a validator is not the code, it is the paths around it. This writes a
 config holding only what differs between hosts, and the directories its data is kept in.
 
 What it will not do is guess a wallet or a netuid. Those are the two lines it leaves for you, and
-`robotensor doctor` tells you the moment either is wrong.
+`attune doctor` tells you the moment either is wrong.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-CONFIG = "robotensor.toml"
+CONFIG = "attune.toml"
 
 VALIDATOR_TOML = """\
-# Written by `robotensor init`. State, stores and runs are kept in var/ beside this file.
+# Written by `attune init`. State, stores and runs are kept in var/ beside this file.
 # `finney` is mainnet, `test` the test network, or a ws:// address of your own.
 network = "{network}"
 netuid = {netuid}
@@ -23,7 +23,7 @@ wallet = {{ name = "{wallet_name}", hotkey = "{wallet_hotkey}" }}
 
 [vector]
 # The two environments a duel needs, and the RoboTwin-Vector checkout the simulator runs from; see
-# the README. `robotensor doctor` checks all three.
+# the README. `attune doctor` checks all three.
 policy_python = "{policy_python}"
 simulator_python = "{simulator_python}"
 simulator_root = "{simulator_root}"
@@ -34,9 +34,9 @@ mirror = ""
 MINER_NEXT = """\
 A submission is weights and nothing else. Three commands, in this order:
 
-    robotensor miner check  --dir {directory}/submission
-    robotensor miner upload --dir {directory}/submission --repo <you>/<name> --private
-    robotensor miner commit --repo <you>/<name> --revision <the sha upload printed> \\
+    attune miner check  --dir {directory}/submission
+    attune miner upload --dir {directory}/submission --repo <you>/<name> --private
+    attune miner commit --repo <you>/<name> --revision <the sha upload printed> \\
         --netuid <N> --network test --wallet.name <w> --wallet.hotkey <h>
 
 Then make the repository public. Committing while it is private is what keeps your weights from

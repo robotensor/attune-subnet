@@ -5,7 +5,7 @@
 #
 # Built by docker/build.sh, which stages the checkouts side by side as the build context:
 #
-#   RoboTwin-Vector/   vector-orchestrator/   robotensor-subnet/
+#   RoboTwin-Vector/   vector-orchestrator/   attune-subnet/
 #
 # Everything lives under /opt, laid out as a hand-built host lays out /root/robotensor, and
 # /root/robotensor and /root/miniforge3 are links to it: lium mounts the pod's volume over /root,
@@ -58,7 +58,7 @@ RUN env=/opt/miniforge3/envs/robotwin \
 
 # ---- policy and host: the two uv venvs, at the versions of their lock files -----------------
 FROM base AS policy
-COPY robotensor-subnet/docker/policy.lock.txt /tmp/
+COPY attune-subnet/docker/policy.lock.txt /tmp/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv -q --python /usr/bin/python3.12 /opt/robotensor/.venvs/vector-policy \
     && uv pip install -q --python /opt/robotensor/.venvs/vector-policy/bin/python \
@@ -66,7 +66,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
         -r /tmp/policy.lock.txt
 
 FROM base AS host
-COPY robotensor-subnet/docker/host.lock.txt /tmp/
+COPY attune-subnet/docker/host.lock.txt /tmp/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv venv -q --python /usr/bin/python3.12 /opt/robotensor/.venvs/subnet \
     && uv pip install -q --python /opt/robotensor/.venvs/subnet/bin/python -r /tmp/host.lock.txt
@@ -114,15 +114,15 @@ COPY --link --from=host /opt/robotensor/.venvs/subnet /opt/robotensor/.venvs/sub
 # The checkouts, last: they change most.
 COPY RoboTwin-Vector/ ${RT}/
 COPY vector-orchestrator/ /opt/robotensor/vector/vector-orchestrator/
-COPY robotensor-subnet/ /opt/robotensor/robotensor-subnet/
+COPY attune-subnet/ /opt/robotensor/attune-subnet/
 RUN --mount=type=cache,target=/root/.cache/uv \
-    bash /opt/robotensor/robotensor-subnet/docker/install-checkouts.sh \
+    bash /opt/robotensor/attune-subnet/docker/install-checkouts.sh \
     && (cd "${RT}" && /opt/miniforge3/envs/robotwin/bin/python scripts/update_embodiment_config_path.py >/dev/null) \
     && ln -s /opt/miniforge3/envs/robotwin /opt/robotensor/.venvs/robotwin-bench \
     && ln -s /opt/robotensor /root/robotensor && ln -s /opt/miniforge3 /root/miniforge3 \
     && for cmd in pod-init pod-check rt-bench; do \
-           ln -s "/opt/robotensor/robotensor-subnet/docker/${cmd}.sh" "/usr/local/bin/${cmd}"; done \
-    && for cmd in robotensor vector-orchestrator vector-runtime; do \
+           ln -s "/opt/robotensor/attune-subnet/docker/${cmd}.sh" "/usr/local/bin/${cmd}"; done \
+    && for cmd in attune robotensor vector-orchestrator vector-runtime; do \
            ln -s "/opt/robotensor/.venvs/subnet/bin/${cmd}" "/usr/local/bin/${cmd}"; done \
     && printf 'export %s\n' CONDA_ROOT="${CONDA_ROOT}" ROBOTWIN_BENCH_ROOT="${ROBOTWIN_BENCH_ROOT}" \
         ROBOTWIN_BENCH_PYTHON="${ROBOTWIN_BENCH_PYTHON}" > /etc/profile.d/robotensor.sh

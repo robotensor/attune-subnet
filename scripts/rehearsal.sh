@@ -2,7 +2,7 @@
 # The whole subnet loop on a local chain, with two vector_v1.1 submissions on the Hub:
 #
 #   1. a localnet with the subnet, the owner (validator) and two miners   (localnet.sh, localnet_setup.py)
-#   2. miner1 commits KING, then miner2 commits CHALLENGER                  (robotensor miner commit)
+#   2. miner1 commits KING, then miner2 commits CHALLENGER                  (attune miner commit)
 #   3. the validator takes both in; KING, the older, takes the empty throne by genesis; CHALLENGER
 #      duels it, seeded from a block after its commitment               (validator run --once, twice)
 #   4. the validator sets weights: the champions' hotkeys get the lane's share, the rest burns

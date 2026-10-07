@@ -1,4 +1,4 @@
-"""`robotensor doctor`: can this host do what it is configured to do?
+"""`attune doctor`: can this host do what it is configured to do?
 
 Everything a validator needs is checked here, once, in seconds, and said in one place: the config
 as it was actually read, the chain, the wallet, the Hub token, the disk, the clock, and for each
@@ -338,7 +338,7 @@ def report(config: str | None, competition: str | None, *, role: str = "validato
 
 def render(found: Report) -> str:
     """The report as an operator reads it: one line per check, the failures last in the eye."""
-    lines = [f"robotensor doctor: {found.role}, {found.competition}"]
+    lines = [f"attune doctor: {found.role}, {found.competition}"]
     for check in found.checks:
         mark = "ok  " if check.ok else ("warn" if check.advisory else "FAIL")
         lines.append(f"  [{mark}] {check.name}: {check.detail}")

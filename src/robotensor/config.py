@@ -4,14 +4,14 @@
     netuid = 0
     wallet = { name = "validator", hotkey = "default" }    # and `path`, where btcli keeps it
 
-    [vector]                             # runs Robotensor Vector
+    [vector]                             # runs Vector
     policy_python = "/abs/policy-env/bin/python"
     simulator_python = "/abs/simulator-env/bin/python"
     simulator_root = "/abs/RoboTwin-Vector"
     mirror = "owner/vector-results"      # optional: the dataset the store is published to
     workers = 1                          # optional: units at once on each GPU, for its memory
 
-    [horizon]                            # runs Robotensor Horizon; see HorizonConfig
+    [horizon]                            # runs Horizon; see HorizonConfig
 
 Only what differs between hosts is here. Everything else is fixed in code: each competition's share
 of the emission, the data directory (`var/<config name>/` beside `config/`, or `var/` beside a
@@ -69,7 +69,7 @@ VECTOR_KEYS = ("policy_python", "simulator_python", "simulator_root", "mirror", 
 
 @dataclass(frozen=True)
 class HorizonConfig(LaneConfig):
-    """Robotensor Horizon. Its schedule is the chain's: `genesis_block` and `window_blocks` are all
+    """Horizon. Its schedule is the chain's: `genesis_block` and `window_blocks` are all
     two validators need to agree on which round is open (`protocol.schedule`)."""
 
     genesis_block: int = 0

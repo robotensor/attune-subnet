@@ -6,6 +6,8 @@
 #   PUBLIC_KEY / SSH_PUBLIC_KEY   authorised for root, and sshd started if nothing serves port 22
 #   ROBOTENSOR_PULL=1             fast-forward the three checkouts first, then reinstall them
 set -uo pipefail
+# This checkout, wherever the image put it: attune-subnet, or robotensor-subnet in older images.
+SUBNET="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 log() { printf '\033[95m[pod-init]\033[0m %s\n' "$*"; }
 
 # lium mounts the pod's volume over /root, which hides the links the image made there.
@@ -45,11 +47,11 @@ fi
 
 if [[ "${ROBOTENSOR_PULL:-0}" == "1" ]]; then
     for repo in /opt/robotensor/vector/RoboTwin-Vector /opt/robotensor/vector/vector-orchestrator \
-        /opt/robotensor/robotensor-subnet; do
+        "${SUBNET}"; do
         git -C "${repo}" pull -q --ff-only && log "pulled ${repo}: $(git -C "${repo}" log --oneline -1)" \
             || log "could not fast-forward ${repo}; left at $(git -C "${repo}" log --oneline -1)"
     done
-    bash /opt/robotensor/robotensor-subnet/docker/install-checkouts.sh && log "checkouts reinstalled"
+    bash "${SUBNET}/docker/install-checkouts.sh" && log "checkouts reinstalled"
 fi
 
 log "ready: $(nvidia-smi -L 2>/dev/null | wc -l) GPU(s); run pod-check to see that the simulator renders"

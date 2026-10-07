@@ -1,4 +1,4 @@
-"""`robotensor-miner`: check a `vector_v1.1` weights file, submit it and commit it on chain.
+"""`attune miner`: check a `vector_v1.1` weights file, submit it and commit it on chain.
 
     check    model.safetensors, the only file a submission holds, against the architecture the
              validator serves, as the validator checks it
@@ -187,7 +187,7 @@ def _chain_args(parser: argparse.ArgumentParser) -> None:
 
 
 def add_subcommands(sub: Any) -> None:
-    """Hang a miner's verbs off `sub`, so `robotensor miner ...` and the standalone command are
+    """Hang a miner's verbs off `sub`, so `attune miner ...` and the standalone command are
     the same parser rather than two that drift."""
     check = sub.add_parser("check", help="check model.safetensors as the validator does")
     check.add_argument(

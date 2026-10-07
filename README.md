@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/header.png" alt="Robotensor Subnet: the open frontier for adaptive robot intelligence" width="100%">
+  <img src="assets/header.png" alt="Attune: the open frontier for adaptive robot intelligence" width="100%">
 </p>
 
 <p align="center">
@@ -17,10 +17,10 @@
 
 ---
 
-**Robotensor** is a Bittensor subnet for robot foundation models. Miners submit policy weights;
+**Attune** is a Bittensor subnet for robot foundation models, built by [Robotensor](https://www.robotensor.ai). Miners submit policy weights;
 validators score them in simulation and set weights on chain.
 
-The first competition is **Robotensor Vector**: a policy (`vector_v1.1`) is shown one
+The first competition is **Vector**: a policy (`vector_v1.1`) is shown one
 demonstration of a task and must complete the same task in a different scene.
 
 ## How it works
@@ -28,7 +28,7 @@ demonstration of a task and must complete the same task in a different scene.
 | | |
 |---|---|
 | **Submission** | A Hugging Face model repo containing only `model.safetensors` (and an optional README). |
-| **Commitment** | `vector:<owner>/<repo>@<commit>.<digest>` on chain: the revision and the sha256 of `model.safetensors`, in base64url. `robotensor miner commit` builds it; repo ids can be up to 49 characters long. |
+| **Commitment** | `vector:<owner>/<repo>@<commit>.<digest>` on chain: the revision and the sha256 of `model.safetensors`, in base64url. `attune miner commit` builds it; repo ids can be up to 49 characters long. |
 | **Queue** | The validator queues a commitment as soon as it reads it from the chain, oldest first. **One submission per hotkey**: once a hotkey is queued, its later commitments are refused. |
 | **Scoring** | King of the hill. Each queued submission duels the current king on 160 units (16 tasks × 10), seeded from the finalized block when the duel starts. That block must come after the commitment. The challenger takes the crown when its average success rate beats the king's by 3+ points. |
 | **Rewards** | The lane's share goes to the 4 most recent champions: 40% / 30% / 20% / 10%, newest first. |
@@ -56,7 +56,7 @@ as duplicates, and the earlier commitment keeps them.
 
 | Repo | Role |
 |---|---|
-| [`robotensor-subnet`](https://github.com/robotensor/robotensor-subnet) | Chain side: commitments, queue, seeds, weights, validator loop, miner CLI |
+| [`attune-subnet`](https://github.com/robotensor/attune-subnet) | Chain side: commitments, queue, seeds, weights, validator loop, miner CLI |
 | [`vector-orchestrator`](https://github.com/robotensor/vector-orchestrator) | Duel engine, result store, `vector-runtime` and `vector-protocol` |
 | [`RoboTwin-Vector`](https://github.com/robotensor/RoboTwin-Vector) | RoboTwin 2.0 fork with the level gate and the benchmark harness |
 
@@ -68,10 +68,10 @@ architecture pins (`vector_runtime/vector_v1.1.json` in the orchestrator).
 ```bash
 pip install "robotensor[vector]"
 
-robotensor miner check --dir submission/
+attune miner check --dir submission/
 
 export HF_TOKEN=...
-robotensor miner submit --dir submission/ --repo <you>/vector-mine \
+attune miner submit --dir submission/ --repo <you>/vector-mine \
     --network finney --netuid <N> --wallet.name miner --wallet.hotkey default
 ```
 
@@ -83,7 +83,7 @@ hold a place: a king whose repo is gone is dethroned and its share is burned.
 Check your entry with:
 
 ```bash
-robotensor miner status --hotkey <ss58> --network finney --netuid <N>
+attune miner status --hotkey <ss58> --network finney --netuid <N>
 ```
 
 ## Validating
@@ -99,10 +99,10 @@ One GPU host with three Python environments:
 ```bash
 git clone -b vector https://github.com/robotensor/RoboTwin-Vector.git
 git clone https://github.com/robotensor/vector-orchestrator.git
-git clone https://github.com/robotensor/robotensor-subnet.git
+git clone https://github.com/robotensor/attune-subnet.git
 
 uv venv --python 3.12 .venvs/subnet
-uv pip install --python .venvs/subnet/bin/python -e robotensor-subnet -e vector-orchestrator \
+uv pip install --python .venvs/subnet/bin/python -e attune-subnet -e vector-orchestrator \
     -e vector-orchestrator/packages/vector-protocol -e vector-orchestrator/packages/vector-runtime
 ```
 
@@ -121,9 +121,9 @@ workers = 1   # units per GPU; one unit can use up to 34 GB
 ```
 
 ```bash
-robotensor doctor --config config/<network>.toml
+attune doctor --config config/<network>.toml
 export HF_TOKEN=...
-robotensor validator --config config/<network>.toml run
+attune validator --config config/<network>.toml run
 ```
 
 `status`, `weights --dry-run` and `duel --challenger owner/name@sha` are also available.

@@ -1,4 +1,4 @@
-"""Robotensor Horizon: chain commitments in, weekly rounds out, through its engine.
+"""Horizon: chain commitments in, weekly rounds out, through its engine.
 
 This module is the chain's side of Competition 2 and nothing else. The engine is
 `horizon_competition` (the pool, the evaluation, the scoring and the store) and the model

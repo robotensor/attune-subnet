@@ -2,7 +2,13 @@
 
 import pytest
 
-from robotensor.cli import COMPETITION_ENV, CompetitionError, build_parser, competition
+from robotensor.cli import (
+    COMPETITION_ENV,
+    LEGACY_COMPETITION_ENV,
+    CompetitionError,
+    build_parser,
+    competition,
+)
 from robotensor.doctor import Check, Report, render
 
 
@@ -14,6 +20,13 @@ def test_the_flag_wins_over_the_environment_and_the_config():
 
 def test_the_environment_saves_saying_it_on_every_command():
     assert competition(None, {"vector": 1, "horizon": 2}, {COMPETITION_ENV: "horizon"}) == "horizon"
+
+
+def test_the_environment_variable_s_old_name_still_counts():
+    old = {LEGACY_COMPETITION_ENV: "horizon"}
+    assert competition(None, {"vector": 1, "horizon": 2}, old) == "horizon"
+    both = {COMPETITION_ENV: "vector", LEGACY_COMPETITION_ENV: "horizon"}
+    assert competition(None, {"vector": 1, "horizon": 2}, both) == "vector"
 
 
 def test_one_competition_enabled_needs_no_saying():

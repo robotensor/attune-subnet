@@ -1,19 +1,19 @@
-"""`robotensor`: one command for everything a miner or a validator of this subnet does.
+"""`attune`: one command for everything a miner or a validator of this subnet does.
 
-    robotensor init [DIR] [--role miner|validator]
-    robotensor --version
-    robotensor doctor [--competition vector] [--role miner|validator] [--json]
-    robotensor status [--competition vector]
-    robotensor miner     check | upload | commit | status
-    robotensor validator run | intake | duel | weights | status
+    attune init [DIR] [--role miner|validator]
+    attune --version
+    attune doctor [--competition vector] [--role miner|validator] [--json]
+    attune status [--competition vector]
+    attune miner     check | upload | commit | submit | status
+    attune validator run | intake | duel | weights | status
 
 Which competition a command means is resolved once, in this order: `--competition`, then
-`$ROBOTENSOR_COMPETITION`, then the only one the config enables. Two enabled and nothing said is
+`$ATTUNE_COMPETITION` (or the older `$ROBOTENSOR_COMPETITION`), then the only one the config enables. Two enabled and nothing said is
 an error naming them, because a miner who meant the other one should not find out from a refused
 submission.
 
-`robotensor-miner` and `robotensor-validator` are the same parsers under their old names, and stay
-through 0.2 so a running validator's unit file keeps working.
+`robotensor`, `robotensor-miner` and `robotensor-validator` are the same parsers under their old
+names, kept so scripts and a running validator's unit file keep working.
 """
 
 from __future__ import annotations
@@ -28,7 +28,9 @@ from typing import Any
 from . import __version__
 
 #: The variable a host can set instead of passing `--competition` to everything.
-COMPETITION_ENV = "ROBOTENSOR_COMPETITION"
+COMPETITION_ENV = "ATTUNE_COMPETITION"
+#: Its name before the subnet was Attune, still read when the new one is not set.
+LEGACY_COMPETITION_ENV = "ROBOTENSOR_COMPETITION"
 
 
 class CompetitionError(ValueError):
@@ -42,7 +44,7 @@ def competition(
 ) -> str:
     """Which competition a command means: the flag, the environment, or the only one enabled."""
     environ = os.environ if environ is None else environ
-    named = chosen or environ.get(COMPETITION_ENV) or ""
+    named = chosen or environ.get(COMPETITION_ENV) or environ.get(LEGACY_COMPETITION_ENV) or ""
     if named:
         if enabled is not None and named not in enabled:
             raise CompetitionError(
@@ -74,7 +76,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 0
     path = init_.validator(directory)
     print(f"wrote {path}")
-    print("Fill in the wallet and the netuid, then: robotensor doctor --config", path)
+    print("Fill in the wallet and the netuid, then: attune doctor --config", path)
     return 0
 
 
@@ -105,8 +107,8 @@ def build_parser() -> argparse.ArgumentParser:
     from . import miner as miner_
     from . import validator as validator_
 
-    parser = argparse.ArgumentParser(prog="robotensor", description=__doc__.split("\n")[0])
-    parser.add_argument("--version", action="version", version=f"robotensor {__version__}")
+    parser = argparse.ArgumentParser(prog="attune", description=__doc__.split("\n")[0])
+    parser.add_argument("--version", action="version", version=f"attune {__version__}")
     sub = parser.add_subparsers(dest="part", required=True)
 
     start = sub.add_parser("init", help="a working directory, and a config to fill in")

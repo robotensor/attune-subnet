@@ -17,5 +17,5 @@ uv pip install -q --python "${ROOT}/.venvs/vector-policy/bin/python" -c "${HERE}
     -e "${ORCH}/packages/vector-runtime[model]" -e "${ORCH}/packages/vector-protocol"
 # host
 uv pip install -q --python "${ROOT}/.venvs/subnet/bin/python" -c "${HERE}/host.lock.txt" \
-    -e "${ROOT}/robotensor-subnet" -e "${ORCH}" \
+    -e "$(cd "${HERE}/.." && pwd)" -e "${ORCH}" \
     -e "${ORCH}/packages/vector-protocol" -e "${ORCH}/packages/vector-runtime"

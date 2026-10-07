@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "robotensor"
-version = "0.2.0"
-description = "Miner and validator tooling for the Robotensor Bittensor subnet."
+version = "0.2.1"
+description = "Miner and validator tooling for Attune, Robotensor's Bittensor subnet."
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
@@ -24,11 +24,12 @@ vector = ["robotensor-vector-runtime>=0.2"]
 dev = ["pytest>=8", "ruff==0.16.7"]
 
 [project.urls]
-Repository = "https://github.com/robotensor/robotensor-subnet"
+Repository = "https://github.com/robotensor/attune-subnet"
 
 [project.scripts]
+attune = "robotensor.cli:main"
+# The command's earlier names, kept so existing scripts and unit files keep working.
 robotensor = "robotensor.cli:main"
-# Pre-0.2 entry points, kept so existing unit files keep working.
 robotensor-miner = "robotensor.miner:main"
 robotensor-validator = "robotensor.validator:main"
 

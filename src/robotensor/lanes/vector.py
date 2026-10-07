@@ -1,4 +1,4 @@
-"""Robotensor Vector: chain commitments in, king-of-the-hill duels out, through its orchestrator.
+"""Vector: chain commitments in, king-of-the-hill duels out, through its orchestrator.
 
 This module is the chain's side of the lane and nothing else. The lane engine is
 `vector_orchestrator` (duels, the weights runtime, the store), run as a library on its `spec.json`;

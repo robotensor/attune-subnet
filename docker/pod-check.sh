@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Can this pod run a duel? The things a rented machine gets wrong, in under a minute: the GPUs, the
 # driver's graphics libraries, /dev/shm, SAPIEN rendering, CuRobo's kernels, torch in the policy
-# env, and the benchmark checkout. `robotensor doctor --config ...` checks the rest (chain, wallet,
+# env, and the benchmark checkout. `attune doctor --config ...` checks the rest (chain, wallet,
 # Hub token, disk, clock) once there is a config.
 #
 #   pod-check              # the quick checks

@@ -2,7 +2,6 @@
 
     attune init [DIR] [--role miner|validator]
     attune --version
-    attune doctor [--competition vector] [--role miner|validator] [--json]
     attune status [--competition vector]
     attune miner     check | upload | commit | submit | status
     attune validator run | intake | duel | weights | status
@@ -76,19 +75,8 @@ def cmd_init(args: argparse.Namespace) -> int:
         return 0
     path = init_.validator(directory)
     print(f"wrote {path}")
-    print("Fill in the wallet and the netuid, then: attune doctor --config", path)
+    print(f"Fill in the wallet and the netuid, then: attune validator --config {path} run")
     return 0
-
-
-def cmd_doctor(args: argparse.Namespace) -> int:
-    from .doctor import render, report
-
-    found = report(args.config, args.competition, role=args.role)
-    if args.json:
-        print(json.dumps(found.as_dict(), indent=1, default=str))
-    else:
-        print(render(found))
-    return 0 if found.ok else 1
 
 
 def cmd_status(args: argparse.Namespace) -> int:
@@ -118,15 +106,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     start.add_argument("--competition", default=None, help="vector (the only one open)")
     start.set_defaults(func=cmd_init)
-
-    doctor = sub.add_parser("doctor", help="can this host do what it is configured to do?")
-    doctor.add_argument("--config", default=None, help="config/<network>.toml")
-    doctor.add_argument("--competition", default=None, help="vector (the only one open)")
-    doctor.add_argument(
-        "--role", default="validator", choices=("miner", "validator"), help="what to check for"
-    )
-    doctor.add_argument("--json", action="store_true", help="the report as JSON")
-    doctor.set_defaults(func=cmd_doctor)
 
     status = sub.add_parser("status", help="where a competition stands")
     status.add_argument("--config", required=True, help="config/<network>.toml")

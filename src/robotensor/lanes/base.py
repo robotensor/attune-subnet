@@ -14,7 +14,7 @@ Two rules make that possible:
   and a validator running one competition does not install the other's engine. A lane catches its
   own and returns a `Progress` saying what happened. `tests/test_lane.py` holds it to that.
 
-`doctor()` and the lane's own subcommands are not here yet: they arrive with the one `attune`
+The lane's own subcommands are not here yet: they arrive with the one `attune`
 command, and adding them to this protocol before there is anything to call would be a promise
 without a caller.
 """

@@ -121,7 +121,6 @@ workers = 1   # units per GPU; one unit can use up to 34 GB
 ```
 
 ```bash
-attune doctor --config config/<network>.toml
 export HF_TOKEN=...
 attune validator --config config/<network>.toml run
 ```
@@ -145,8 +144,8 @@ subtensor.
 
 ### Releasing the miner package
 
-Miners install `robotensor-attune` from PyPI: the `attune` command with `init`, `doctor` and
-`miner` only, and none of the validator. `miner/build.sh` lays out the miner's modules and copies
+Miners install `robotensor-attune` from PyPI: the `attune` command with `init` and `miner`
+only, and none of the validator. `miner/build.sh` lays out the miner's modules and copies
 vector-runtime's weights check from the vector-orchestrator checkout beside this one; it refuses
 a tensor manifest that is not the one `spec.json` pins. The version is `__version__` in
 `src/robotensor/__init__.py`.

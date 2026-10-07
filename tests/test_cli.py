@@ -9,7 +9,6 @@ from robotensor.cli import (
     build_parser,
     competition,
 )
-from robotensor.doctor import Check, Report, render
 
 
 def test_the_flag_wins_over_the_environment_and_the_config():
@@ -62,43 +61,6 @@ def test_the_version_is_the_packages():
         build_parser().parse_args(["--version"])
 
     assert exit_.value.code == 0 and __version__
-
-
-def test_a_warning_alone_does_not_sink_a_report():
-    """A clock 3 seconds out is worth saying and is not a reason to refuse to run."""
-    found = Report("validator", "vector", [Check("clock", False, "3 s", advisory=True)])
-
-    assert found.ok
-    assert "[warn] clock" in render(found)
-
-
-def test_a_failed_check_sinks_the_report_and_says_so():
-    found = Report("validator", "vector", [Check("gpu", False, "no GPU")])
-
-    assert not found.ok
-    shown = render(found)
-    assert "[FAIL] gpu" in shown and "must be fixed" in shown
-
-
-def test_a_miners_report_needs_no_config_and_no_chain():
-    from robotensor.doctor import report
-
-    found = report(None, "vector", role="miner")
-
-    assert found.role == "miner" and found.competition == "vector"
-    names = [c.name for c in found.checks]
-    assert "python" in names and "submission fee" in names
-    assert "chain" not in names and "wallet" not in names
-
-
-def test_the_report_says_there_is_no_submission_fee():
-    """SN80 charges 0.1 TAO an evaluation; a miner comparing the two should not have to guess."""
-    from robotensor.doctor import report
-
-    found = report(None, "vector", role="miner")
-    fee = next(c for c in found.checks if c.name == "submission fee")
-
-    assert fee.ok and "charges nothing" in fee.detail
 
 
 def test_init_writes_a_config_that_loads(tmp_path):

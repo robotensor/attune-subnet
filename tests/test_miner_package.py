@@ -30,20 +30,10 @@ def test_the_miner_command_has_the_miner_s_parts_and_no_validator():
     check = parser.parse_args(["miner", "check", "--dir", "submission/"])
     assert check.part == "miner" and check.command == "check"
     assert parser.parse_args(["init", "--role", "miner"]).func is miner_cli.cmd_init
-    assert parser.parse_args(["doctor", "--json"]).func is miner_cli.cmd_doctor
     with pytest.raises(SystemExit):
         parser.parse_args(["validator", "--config", "c.toml", "status"])
-
-
-def test_the_competition_comes_from_the_flag_then_the_environment(monkeypatch):
-    monkeypatch.delenv("ATTUNE_COMPETITION", raising=False)
-    monkeypatch.setenv("ROBOTENSOR_COMPETITION", "horizon")
-    assert miner_cli.competition(None) == "horizon"
-    monkeypatch.setenv("ATTUNE_COMPETITION", "vector")
-    assert miner_cli.competition(None) == "vector"
-    assert miner_cli.competition("horizon") == "horizon"
-    with pytest.raises(miner_cli.CompetitionError):
-        miner_cli.competition("nope")
+    with pytest.raises(SystemExit):
+        parser.parse_args(["doctor"])
 
 
 @pytest.mark.skipif(ORCHESTRATOR is None, reason="no vector-orchestrator checkout beside this one")
@@ -65,7 +55,6 @@ def test_the_package_holds_the_miner_and_runs_on_its_own(tmp_path):
         "robotensor/hub.py",
         "robotensor/chain.py",
         "robotensor/init.py",
-        "robotensor/doctor.py",
         "robotensor/protocol/__init__.py",
         "robotensor/protocol/commitment.py",
         "vector_runtime/__init__.py",
@@ -85,7 +74,7 @@ def test_the_package_holds_the_miner_and_runs_on_its_own(tmp_path):
         "text": True,
     }
     helped = subprocess.run([sys.executable, "-S", "-m", "robotensor.miner_cli", "--help"], **run)
-    assert helped.returncode == 0 and "{init,doctor,miner}" in helped.stdout
+    assert helped.returncode == 0 and "{init,miner}" in helped.stdout
 
     junk = tmp_path / "model.safetensors"
     junk.write_bytes(b"\x08\x00\x00\x00\x00\x00\x00\x00{}      ")

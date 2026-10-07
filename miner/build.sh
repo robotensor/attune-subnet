@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build the miner's package, robotensor-attune: the `attune` command with `init`, `doctor` and
-# `miner` only, and none of the validator. `attune miner check` is vector-runtime's own check,
+# Build the miner's package, robotensor-attune: the `attune` command with `init` and `miner`
+# only, and none of the validator. `attune miner check` is vector-runtime's own check,
 # copied from the vector-orchestrator checkout beside this one, and the build refuses a tensor
 # manifest that is not the one the orchestrator's spec.json pins, so a miner's check is the
 # validator's.
@@ -20,7 +20,7 @@ RUNTIME="${ORCHESTRATOR}/packages/vector-runtime/src/vector_runtime"
 log() { printf '\033[95m[miner]\033[0m %s\n' "$*"; }
 
 # What the miner's commands import, and nothing else.
-SUBNET_FILES=(__init__.py miner_cli.py miner.py hub.py chain.py init.py doctor.py
+SUBNET_FILES=(__init__.py miner_cli.py miner.py hub.py chain.py init.py
     protocol/__init__.py protocol/commitment.py)
 RUNTIME_FILES=(__init__.py check.py header.py vector_v1.1.json)
 

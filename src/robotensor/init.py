@@ -3,8 +3,7 @@
 What is fiddly about running a validator is not the code, it is the paths around it. This writes a
 config holding only what differs between hosts, and the directories its data is kept in.
 
-What it will not do is guess a wallet or a netuid. Those are the two lines it leaves for you, and
-`attune doctor` tells you the moment either is wrong.
+What it will not do is guess a wallet or a netuid. Those are the two lines it leaves for you.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ wallet = {{ name = "{wallet_name}", hotkey = "{wallet_hotkey}" }}
 
 [vector]
 # The two environments a duel needs, and the RoboTwin-Vector checkout the simulator runs from; see
-# the README. `attune doctor` checks all three.
+# the README.
 policy_python = "{policy_python}"
 simulator_python = "{simulator_python}"
 simulator_root = "{simulator_root}"

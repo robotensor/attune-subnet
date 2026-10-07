@@ -1,0 +1,35 @@
+# The miner's package, robotensor-attune. Not built from here: `miner/build.sh` lays out the
+# sources it names below (the miner's modules of src/robotensor, and vector-runtime's weights check)
+# beside a copy of this file, and builds the wheel from that.
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "robotensor-attune"
+dynamic = ["version"]
+description = "The miner's command for Attune, Robotensor's Bittensor subnet: check, upload and commit a submission."
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+keywords = ["bittensor", "robotics", "robot-learning", "attune"]
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+# bittensor 11 changed the SDK API (see chain.py).
+dependencies = ["bittensor==10.5.0", "huggingface_hub>=1.0"]
+
+[project.urls]
+Homepage = "https://attune.robotensor.ai"
+Documentation = "https://attune.robotensor.ai/docs/vector"
+
+[project.scripts]
+attune = "robotensor.miner_cli:main"
+
+[tool.hatch.version]
+path = "src/robotensor/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/robotensor", "src/vector_runtime"]

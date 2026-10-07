@@ -66,7 +66,7 @@ A submission is a `vector_v1.1` weights file: `model.safetensors`, with exactly 
 architecture pins (`vector_runtime/vector_v1.1.json` in the orchestrator).
 
 ```bash
-pip install "robotensor[vector]"
+pip install robotensor-attune
 
 attune miner check --dir submission/
 
@@ -142,6 +142,22 @@ pytest -q -m "not chain and not gpu"
 
 `scripts/localnet.sh up` and `scripts/localnet_setup.py` run the full loop against a local
 subtensor.
+
+### Releasing the miner package
+
+Miners install `robotensor-attune` from PyPI: the `attune` command with `init`, `doctor` and
+`miner` only, and none of the validator. `miner/build.sh` lays out the miner's modules and copies
+vector-runtime's weights check from the vector-orchestrator checkout beside this one; it refuses
+a tensor manifest that is not the one `spec.json` pins. The version is `__version__` in
+`src/robotensor/__init__.py`.
+
+```bash
+bash miner/build.sh                     # miner/dist/robotensor_attune-<version>-py3-none-any.whl
+twine upload miner/dist/robotensor_attune-<version>-py3-none-any.whl
+```
+
+Rebuild and upload whenever the miner's commands or the architecture change. Validators do not
+install it: their install from source has the same commands.
 
 ## License
 

@@ -6,3 +6,4 @@ var/
 .pytest_cache/
 .ruff_cache/
 wallets/
+miner/dist/

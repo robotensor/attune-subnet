@@ -109,3 +109,48 @@ def test_submit_is_one_command_in_the_order_that_keeps_weights_yours():
     )
 
     assert args.command == "submit" and not args.keep_private
+
+
+def test_status_reads_the_commitment_back_from_the_hub(monkeypatch, capsys):
+    """`miner status` looks the commitment up with the real Hub check, so a submission that is
+    fine reports its digest matching, not an error."""
+    import hashlib
+    import json
+    from types import SimpleNamespace
+
+    from robotensor import chain, hub, miner
+    from robotensor.protocol import commitment
+
+    sha = "a" * 40
+    weights = hashlib.sha256(b"tensors").hexdigest()
+
+    class FakeChain:
+        def __init__(self, network, netuid):
+            pass
+
+        def commitments(self):
+            data = commitment.encode("me/mine", sha, weights)
+            return [chain.Commitment("hk", 10, data), chain.Commitment("other", 11, data)]
+
+        def close(self):
+            pass
+
+    hub_api = SimpleNamespace(
+        model_info=lambda repo, revision, files_metadata: SimpleNamespace(
+            sha=revision,
+            siblings=[
+                SimpleNamespace(
+                    rfilename="model.safetensors", size=7, lfs=SimpleNamespace(sha256=weights)
+                )
+            ],
+        )
+    )
+    real = hub.inspect
+    monkeypatch.setattr(chain, "Chain", FakeChain)
+    monkeypatch.setattr(hub, "inspect", lambda *a, **kw: real(*a, **{**kw, "api": hub_api}))
+
+    miner.cmd_status(SimpleNamespace(network="test", netuid=2, hotkey="hk"))
+
+    (entry,) = json.loads(capsys.readouterr().out)
+    assert "problem" not in entry, entry["problem"]
+    assert entry["digest_matches"] and entry["weights_sha256"] == weights

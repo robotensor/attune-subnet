@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "robotensor"
-version = "0.2.1"
+version = "0.2.2"
 description = "Miner and validator tooling for Attune, Robotensor's Bittensor subnet."
 readme = "README.md"
 license = { text = "Apache-2.0" }

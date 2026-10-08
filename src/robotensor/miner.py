@@ -166,7 +166,7 @@ def cmd_status(args: argparse.Namespace) -> int:
             found = hub.inspect(
                 sub.repo,
                 sub.revision,
-                frozenset({hub.WEIGHTS_FILE, "README.md", ".gitattributes"}),
+                hub.vector_shape({hub.WEIGHTS_FILE, "README.md", ".gitattributes"}),
                 token=os.environ.get("HF_TOKEN"),
             )
             entry["weights_sha256"] = found.weights_sha256

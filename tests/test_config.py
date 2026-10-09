@@ -15,6 +15,7 @@ wallet = { name = "owner", hotkey = "hot" }
 policy_python = "/env/policy/bin/python"
 simulator_python = "/env/sim/bin/python"
 simulator_root = "/checkout/RoboTwin-Vector"
+start_block = 1000
 """
 
 
@@ -39,6 +40,7 @@ def test_a_host_config_loads_and_the_rest_is_fixed(tmp_path):
     vector = cfg.vector
     assert vector.simulator_root == "/checkout/RoboTwin-Vector" and vector.mirror == ""
     assert (vector.workers, vector.policy_kwargs) == (1, {"device": "cuda:0"})
+    assert vector.start_block == 1000
 
 
 def test_data_is_kept_beside_the_config_or_in_var_name_for_one_in_config(tmp_path):
@@ -65,6 +67,11 @@ def test_a_host_sets_how_many_units_each_of_its_gpus_runs(tmp_path):
     assert load(write(tmp_path, GOOD + "workers = 3\n")).vector.workers == 3
 
 
+def test_a_local_chain_may_leave_the_start_block_out_and_reads_every_commitment(tmp_path):
+    text = GOOD.replace('"test"', '"ws://127.0.0.1:9944"').replace("start_block = 1000\n", "")
+    assert load(write(tmp_path, text)).vector.start_block == 0
+
+
 def test_a_local_chain_counts_more_blocks(tmp_path):
     cfg = load(write(tmp_path, GOOD.replace('"test"', '"ws://127.0.0.1:9944"')))
     assert cfg.weights_interval_blocks == 100
@@ -77,6 +84,10 @@ def test_a_local_chain_counts_more_blocks(tmp_path):
         (GOOD + 'store = "x"\n', "does not take store"),
         (GOOD + "workers = 0\n", "workers must be a whole number"),
         (GOOD + "workers = 1.5\n", "workers must be a whole number"),
+        (GOOD.replace("start_block = 1000\n", ""), "needs start_block"),
+        (GOOD.replace("start_block = 1000", "start_block = -1"), "start_block must be a whole"),
+        (GOOD.replace("start_block = 1000", "start_block = 10.5"), "start_block must be a whole"),
+        (GOOD.replace("start_block = 1000", "start_block = true"), "start_block must be a whole"),
         (GOOD.replace("netuid = 7\n", ""), "needs netuid"),
         (GOOD.replace('policy_python = "/env/policy/bin/python"\n', ""), "needs policy_python"),
         ("network = 'test'\nnetuid = 1\n", "a validator runs at least one"),

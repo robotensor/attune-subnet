@@ -1,5 +1,6 @@
 """The Vector lane's intake, against a fake Hub and the real orchestrator contract."""
 
+import dataclasses
 import hashlib
 import json
 from pathlib import Path
@@ -112,6 +113,28 @@ def test_a_commitment_this_subnet_does_not_read_is_skipped(lane):
     lane.intake([stale, nonsense, c("hk1", "m/one", A, 10)], 30, api=hub)
 
     assert [(e.hotkey, e.repo) for e in lane.queue()] == [("hk1", "m/one")]
+
+
+def test_a_commitment_made_before_the_start_block_is_not_read(lane):
+    """What miners committed before the competition started does not enter it, and leaves no
+    entry behind: from the start block on, a commitment is read as usual."""
+    lane.cfg = dataclasses.replace(lane.cfg, start_block=20)
+    lane.intake([c("hk1", "m/one", A, 19), c("hk2", "m/two", B, 20)], 30)
+
+    assert [(e.hotkey, e.repo) for e in lane.queue()] == [("hk2", "m/two")]
+    assert [r["hotkey"] for r in lane.state.lane("vector")["entries"].values()] == ["hk2"]
+
+
+def test_a_hotkey_ignored_before_the_start_block_enters_by_committing_again(lane):
+    """An ignored commitment spends nothing: the same hotkey's next one, made from the start block
+    on, is queued rather than refused, even naming the same revision."""
+    lane.cfg = dataclasses.replace(lane.cfg, start_block=20)
+    assert lane.intake([c("hk1", "m/one", A, 10)], 15) == []
+
+    (entry,) = lane.intake([c("hk1", "m/one", A, 25)], 30)
+
+    assert (entry.status, entry.commit_block) == ("queued", 25)
+    assert [e.hotkey for e in lane.queue()] == ["hk1"]
 
 
 def test_a_hotkey_makes_one_submission_and_a_later_commitment_is_refused(lane):

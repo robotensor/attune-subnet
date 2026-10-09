@@ -6,7 +6,9 @@ the benchmark is the RoboTwin-Vector checkout; the model code is `vector_runtime
 
 **Intake.** Every `vector:` commitment on chain is read with the block it was made at: a repository,
 a revision and the sha256 of its weights (`protocol.commitment`). A new one is `queued` at once:
-nothing is asked of the Hub until its turn comes.
+nothing is asked of the Hub until its turn comes. One made before the configured `start_block` is
+not read at all: it is left unrecorded, so it neither enters nor spends its hotkey's submission,
+and the hotkey enters by committing again from that block on.
 
 **One submission per hotkey.** A hotkey's first commitment to reach the queue is its only one: from
 then on, whatever it commits is `refused` - while that entry waits, during its duel, and after it,
@@ -167,6 +169,8 @@ class VectorLane:
                 continue
             if sub.lane != commitment_.VECTOR:
                 continue
+            if c.block < self.cfg.start_block:
+                continue  # made before the competition started: not read, not recorded
             key = submission_key(sub.repo, sub.revision)
             # `pending` is what an older build left waiting for the Hub; it is queued like a new one.
             if key in entries and entries[key]["status"] != PENDING:

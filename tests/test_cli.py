@@ -77,6 +77,7 @@ def test_init_writes_a_config_that_loads(tmp_path):
     assert cfg.shares == {"vector": 0.30}
     assert (tmp_path / "node" / "var" / "state").is_dir()
     assert "wallet" in path.read_text() and "policy_python" in path.read_text()
+    assert cfg.vector.start_block == 0, "a line to fill in, as the wallet and the netuid are"
 
 
 def test_init_will_not_write_over_a_config(tmp_path):

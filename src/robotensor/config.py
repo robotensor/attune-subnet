@@ -10,6 +10,8 @@
     simulator_root = "/abs/RoboTwin-Vector"
     mirror = "owner/vector-results"      # optional: the dataset the store is published to
     workers = 1                          # optional: units at once on each GPU, for its memory
+    start_block = 4000000                # commitments made before this block are ignored; a
+                                         # local chain may leave it out (0)
 
     [horizon]                            # runs Horizon; see HorizonConfig
 
@@ -61,10 +63,15 @@ class VectorConfig(LaneConfig):
     #: Units run at once on each GPU of the lane's lease, each a simulator and a policy server:
     #: as many as one card's memory holds (one unit alone took up to 34 GB on 2026-09-29).
     workers: int = 1
+    #: Commitments made before this block are not read: what miners committed before the
+    #: competition started does not enter it. 0 reads them all.
+    start_block: int = 0
     policy_kwargs: dict[str, str] = field(default_factory=lambda: {"device": "cuda:0"})
 
 
-VECTOR_KEYS = ("policy_python", "simulator_python", "simulator_root", "mirror", "workers")
+VECTOR_KEYS = (
+    "policy_python", "simulator_python", "simulator_root", "mirror", "workers", "start_block",
+)  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -168,6 +175,14 @@ def _vector(
     workers = table.get("workers", 1)
     if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
         raise ConfigError(f"{path}: [vector] workers must be a whole number of at least 1")
+    # A public chain names it: left out, every commitment made before launch would enter.
+    if "start_block" not in table and not local(network):
+        raise ConfigError(
+            f"{path}: [vector] needs start_block, the block from which commitments are read"
+        )
+    start_block = table.get("start_block", 0)
+    if isinstance(start_block, bool) or not isinstance(start_block, int) or start_block < 0:
+        raise ConfigError(f"{path}: [vector] start_block must be a whole number of at least 0")
     return VectorConfig(
         name="vector",
         share=SHARES["vector"],
@@ -176,6 +191,7 @@ def _vector(
         simulator_root=str(_path(root, table["simulator_root"])),
         mirror=str(table.get("mirror", "")),
         workers=workers,
+        start_block=start_block,
         store=data / "vector" / "store",
         run_dir=data / "vector" / "runs",
         cache=data / "vector" / "cache",

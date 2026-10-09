@@ -3,7 +3,8 @@
 What is fiddly about running a validator is not the code, it is the paths around it. This writes a
 config holding only what differs between hosts, and the directories its data is kept in.
 
-What it will not do is guess a wallet or a netuid. Those are the two lines it leaves for you.
+What it will not do is guess a wallet, a netuid or the start block. Those are the lines it leaves
+for you.
 """
 
 from __future__ import annotations
@@ -28,6 +29,9 @@ simulator_python = "{simulator_python}"
 simulator_root = "{simulator_root}"
 # A Hugging Face dataset the store is published to; empty to keep it local.
 mirror = ""
+# The block the competition starts at: commitments made before it are ignored. Set it to the block
+# announced for this network; 0 reads every commitment on chain.
+start_block = {start_block}
 """
 
 MINER_NEXT = """\
@@ -56,6 +60,7 @@ def validator(directory: Path, **values: str) -> Path:
         "policy_python": "/path/to/policy-env/bin/python",
         "simulator_python": "/path/to/simulator-env/bin/python",
         "simulator_root": "/path/to/RoboTwin-Vector",
+        "start_block": "0",
         **values,
     }
     directory.mkdir(parents=True, exist_ok=True)

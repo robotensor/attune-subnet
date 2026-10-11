@@ -126,7 +126,10 @@ attune validator --config config/<network>.toml run
 ```
 
 `status`, `weights --dry-run` and `duel --challenger owner/name@sha` are also available.
-Interrupted duels resume from `var/<network>/`.
+Interrupted duels resume from `var/<network>/`. A validator started on another host with the
+same `mirror` takes the competition up from that dataset (the index, the king and who committed
+what; not the events or clips), and will not start on an empty store while the dataset cannot be
+read.
 
 For rented GPU pods (vast.ai, lium.io), `docker/build.sh` builds an image with all three
 environments, the assets and the checkouts. Run `pod-check --selftest` on a new pod.

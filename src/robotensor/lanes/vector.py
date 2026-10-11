@@ -39,6 +39,14 @@ model, newest first, each mapped to the hotkey that committed it. The ones paid 
 four a miner committed, 40/30/20/10 - are written to the store too (`champions.json`); a vacated
 king's place is there with its part marked burned.
 
+**Another host.** The mirror is the lane's history, and a validator started on a machine of its
+own takes the work up from it rather than starting over: before the engine writes anything, the
+store's manifest, head and index parts are read from the mirror (never its events or clips), with
+the lane's state beside them (`validator/vector.json`, which says which hotkey committed what, and
+which the lane writes there for that reason). An empty store whose mirror cannot be read is not
+started: it would publish a fresh history over the real one. Every step takes up first what the
+mirror holds that the store does not, and a push from a store behind the mirror is refused.
+
 **While a duel runs.** A duel can take hours, and the chain does not stop meanwhile: `refresh` takes
 new commitments in and republishes the queue from another thread (the worker's). Everything that
 reads or writes the lane's state holds the lane's lock; the duel itself runs outside it.
@@ -46,6 +54,7 @@ reads or writes the lane's state holds the lane's lock; the duel itself runs out
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import threading
@@ -59,7 +68,7 @@ from ..config import VectorConfig
 from ..protocol import commitment as commitment_
 from ..protocol import seed as seed_
 from ..protocol.weights import BURNED, CHAMPION_SPLIT
-from ..state import PENDING, QUEUED, State
+from ..state import EMPTY, PENDING, QUEUED, State
 from .base import FAILED, IDLE, WAITING, WORKED, Award, Progress
 
 log = logging.getLogger(__name__)
@@ -73,6 +82,8 @@ MISSING = "missing"
 VACATED = "vacated"
 #: `champions.json`'s layout.
 CHAMPIONS_SCHEMA = 1
+#: The lane's state, as the store keeps it for another host (`Store.validator_path`).
+STATE_FILE = f"validator/{LANE}.json"
 
 
 @dataclass(frozen=True)
@@ -121,6 +132,12 @@ class VectorLane:
 
         spec = load_spec()
         store = Store(self.cfg.store, spec)
+        mirror = None
+        if self.cfg.mirror:
+            from vector_orchestrator.store.mirror import Mirror
+
+            mirror = Mirror(store.root, self.cfg.mirror, token=os.environ.get("HF_TOKEN"))
+            self._take_up(store, mirror, starting=True)
         if store.manifest() is None:
             with store_lock(store.root):
                 store.init()
@@ -130,14 +147,53 @@ class VectorLane:
             cache_root=self.cfg.cache,
             kwargs=self.cfg.policy_kwargs,
         )
-        mirror = None
-        if self.cfg.mirror:
-            from vector_orchestrator.store.mirror import Mirror
-
-            mirror = Mirror(store.root, self.cfg.mirror, token=os.environ.get("HF_TOKEN"))
         return Orchestrator(
             spec, store, runtime, self.cfg.run_dir, mirror=mirror, workers=self.cfg.workers
         )
+
+    # -- the mirror's history, taken up -----------------------------------------------------
+
+    def _take_up(self, store: Any, mirror: Any, *, starting: bool) -> None:
+        """Whatever the mirror holds that the store does not, into the store, and the lane's state
+        with it. Starting with an empty store, a mirror that cannot be read stops the lane;
+        otherwise the store goes on as it is. Raises the orchestrator's `StoreDiverged` when the
+        two hold different records."""
+        from vector_orchestrator.store.mirror import MirrorUnreachable, restore
+
+        try:
+            taken = restore(store, mirror, extra=[STATE_FILE])
+        except MirrorUnreachable as exc:
+            if starting and store.last_record() is None:
+                raise RuntimeError(
+                    f"the store is empty and its mirror cannot be read ({exc}): not starting, "
+                    "since it would publish a fresh history over the mirror's"
+                ) from exc
+            log.warning("the mirror could not be read; going on with the store as it is: %s", exc)
+            return
+        self._adopt(store, taken=taken)
+
+    def _adopt(self, store: Any, *, taken: bool) -> None:
+        """The state the store keeps for the lane, as the lane's own: when the store was just taken
+        up from the mirror (what this host remembered is older), or when this host has none."""
+        from vector_orchestrator.store.writer import read_json
+
+        kept = read_json(store.validator_path(LANE))
+        if not isinstance(kept, dict) or not isinstance(kept.get("entries"), dict):
+            return
+        with self._lock, self.state.writing(LANE) as doc:
+            if doc == kept or (doc["entries"] and not taken):
+                return
+            doc.clear()
+            doc.update(kept)
+            for key, value in EMPTY.items():
+                doc.setdefault(key, copy.deepcopy(value))
+        log.info("took the lane's state up from the store: %d entries", len(kept["entries"]))
+
+    def sync(self) -> None:
+        """Take up what the mirror published that the store does not hold yet."""
+        mirror = self.engine.mirror
+        if mirror is not None:
+            self._take_up(self.engine.store, mirror, starting=False)
 
     @property
     def spec(self) -> Any:
@@ -153,7 +209,9 @@ class VectorLane:
     # -- intake -----------------------------------------------------------------------------
 
     def intake(self, commitments: list[Commitment], block: int, *, api: Any = None) -> list[Entry]:
-        """Take every new `vector:` commitment into the lane; the entries it changed."""
+        """Take every new `vector:` commitment into the lane; the entries it changed. The engine
+        is built first, so a store taken up from the mirror brings its state before intake."""
+        self.engine  # noqa: B018 - built for what it takes up
         with self._lock:
             return self._intake(commitments, block, api=api)
 
@@ -375,7 +433,12 @@ class VectorLane:
         king). An entry whose repository is not there is passed over for the next. Never raises
         the orchestrator's."""
         from vector_orchestrator.duel.orchestrate import CrownMoved, DuelFailed
+        from vector_orchestrator.store.mirror import StoreDiverged
 
+        try:
+            self.sync()
+        except StoreDiverged as exc:
+            return Progress(LANE, FAILED, f"the store and its mirror disagree: {exc}")
         self.publish_queue(self.queue())
         self.publish_champions()
         if self.check_king():
@@ -414,8 +477,9 @@ class VectorLane:
         return Progress(LANE, IDLE, "; ".join(passed))
 
     def publish_queue(self, queue: list[Entry]) -> None:
-        """The waiting entries into the store's `queue.json`, as the dashboard shows them; pushed
-        to the mirror only when they changed."""
+        """The waiting entries into the store's `queue.json`, as the dashboard shows them, and the
+        lane's state beside them (`validator/vector.json`); pushed to the mirror only when either
+        changed."""
         from vector_orchestrator.ids import submission_key
         from vector_orchestrator.store.writer import read_json
 
@@ -433,10 +497,24 @@ class VectorLane:
         }
         with self._lock:
             store = self.engine.store
-            if read_json(store.queue_path()) == snapshot:
-                return
-            store.write_queue(snapshot)
-        self.engine.push_touched()
+            changed = self._write_state()
+            if read_json(store.queue_path()) != snapshot:
+                store.write_queue(snapshot)
+                changed = True
+        if changed:
+            self.engine.push_touched()
+
+    def _write_state(self) -> bool:
+        """The lane's state into the store, for a validator on another host to take up; whether
+        it changed. Called holding the lane's lock."""
+        from vector_orchestrator.store.writer import read_json
+
+        store = self.engine.store
+        doc = self.state.lane(LANE)
+        if read_json(store.validator_path(LANE)) == doc:
+            return False
+        store.write_validator(LANE, doc)
+        return True
 
     def publish_champions(self) -> None:
         """The champions paid now into the store's `champions.json`; pushed only when changed."""

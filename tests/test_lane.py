@@ -54,8 +54,12 @@ class FakeHub:
 
 @pytest.fixture
 def lane(tmp_path):
-    if not Path("/root/robotensor/vector/vector-orchestrator/spec.json").is_file():
-        pytest.skip("the orchestrator checkout is not beside this one")
+    from vector_orchestrator.spec import load_spec
+
+    try:
+        load_spec()
+    except OSError:
+        pytest.skip("the installed orchestrator has no spec.json")
     cfg = VectorConfig(
         name="vector",
         share=0.3,
@@ -540,3 +544,163 @@ def test_a_king_is_vacated_when_the_hub_does_not_answer(lane, monkeypatch):
     monkeypatch.setattr(hub, "inspect", down)
     assert "timeout" in lane.check_king()
     assert lane.engine.store.head()["king"] is None
+
+
+# -- another host takes the lane up from the mirror -----------------------------------------------
+
+
+class FakeMirror:
+    """A Hugging Face dataset as the orchestrator's `Mirror` is asked of it: files by path, shared
+    by every host that names it; a push copies what it names from the host's store."""
+
+    def __init__(self, remote, root):
+        self.remote = remote
+        self.root = Path(root)
+        self.repo = "org/results"
+
+    def read(self, path):
+        from vector_orchestrator.store.mirror import MirrorUnreachable
+
+        if self.remote.get("unreachable"):
+            raise MirrorUnreachable("no route to host")
+        return self.remote["files"].get(path)
+
+    def head(self):
+        data = self.read("head.json")
+        return json.loads(data) if data else None
+
+    def push(self, files, message="publish"):
+        for name in files:
+            if (self.root / name).is_file():
+                self.remote["files"][name] = (self.root / name).read_bytes()
+
+
+@pytest.fixture
+def remote(monkeypatch):
+    from vector_orchestrator.store import mirror
+
+    shared = {"files": {}}
+    monkeypatch.setattr(mirror, "Mirror", lambda root, repo, token=None: FakeMirror(shared, root))
+    return shared
+
+
+def host(path):
+    """A validator's lane on a host of its own (`path`), mirroring to the shared dataset."""
+    cfg = VectorConfig(
+        name="vector",
+        share=0.3,
+        store=path / "store",
+        run_dir=path / "runs",
+        cache=path / "cache",
+        policy_python="python",
+        simulator_python="python",
+        simulator_root="/checkout/RoboTwin-Vector",
+        mirror="org/results",
+    )
+    return VectorLane(cfg, State(path / "state"))
+
+
+def crowning_run(lane, asked):
+    """An `Orchestrator.run` that publishes for real what `genesis_run` only says it did: the
+    challenger crowned, its event and record in the store."""
+
+    def run(req):
+        asked.append(req)
+        store = lane.engine.store
+        event_id = f"{len(asked):064x}"
+        record = {
+            "kind": req.kind,
+            "event_id": event_id,
+            "block": req.block,
+            "king": req.challenger.as_dict(),
+            "dethroned": False,
+        }
+        store.write_event({"event_id": event_id})
+        store.append(record)
+        return SimpleNamespace(
+            published=True, status="published", reason=req.kind, event_id=event_id,
+            as_dict=lambda: {"reason": req.kind, "record": record},
+        )  # fmt: skip
+
+    return run
+
+
+def test_a_validator_on_a_new_host_takes_the_lane_up_where_the_mirror_has_it(
+    tmp_path, remote, hub_of, monkeypatch
+):
+    hub_of({f"m/one@{A}": {"model.safetensors": "w1"}, f"m/two@{B}": {"model.safetensors": "w2"}})
+    first = host(tmp_path / "first")
+    first.intake([c("hk1", "m/one", A, 10), c("hk2", "m/two", B, 20)], 30)
+    monkeypatch.setattr(first.engine, "run", crowning_run(first, []))
+    first.step(chain=FakeChain())
+    assert first.champions() == ["hk1"]
+
+    second = host(tmp_path / "second")
+    asked = []
+    monkeypatch.setattr(second.engine, "run", genesis_run(asked))
+
+    # The crown, the index and who committed what, as the first host left them.
+    assert second.engine.store.head()["king"]["repo"] == "m/one"
+    assert second.engine.store.next_seq() == 2
+    assert second.champions() == ["hk1"]
+    assert statuses(second) == {"hk1": "crowned", "hk2": "queued"}
+    # No events or clips came with it.
+    assert not (tmp_path / "second" / "store" / "events").exists()
+    # hk1 has made its one submission; hk2 duels the king rather than taking an empty throne.
+    (again,) = second.intake([c("hk1", "m/three", C, 40)], 50)
+    assert again.status == "refused"
+    second.step(chain=FakeChain())
+    (req,) = asked
+    assert req.king.repo == "m/one" and req.challenger.repo == "m/two"
+
+
+def test_the_lane_state_is_mirrored_with_the_queue(tmp_path, remote):
+    lane = host(tmp_path)
+    lane.intake([c("hk1", "m/one", A, 10)], 30)
+    lane.publish_queue(lane.queue())
+    kept = json.loads(remote["files"]["validator/vector.json"])
+    assert {r["hotkey"] for r in kept["entries"].values()} == {"hk1"}
+
+
+def test_an_empty_store_whose_mirror_cannot_be_read_is_not_started(tmp_path, remote):
+    remote["unreachable"] = True
+    lane = host(tmp_path)
+    with pytest.raises(RuntimeError, match="not starting"):
+        lane.engine  # noqa: B018
+    assert not (tmp_path / "store" / "manifest.json").exists()
+
+
+def test_a_store_with_a_history_goes_on_while_its_mirror_cannot_be_read(
+    tmp_path, remote, hub_of, monkeypatch
+):
+    hub_of({f"m/one@{A}": {"model.safetensors": "w1"}})
+    first = host(tmp_path / "first")
+    first.intake([c("hk1", "m/one", A, 10)], 30)
+    monkeypatch.setattr(first.engine, "run", crowning_run(first, []))
+    first.step(chain=FakeChain())
+
+    remote["unreachable"] = True
+    again = host(tmp_path / "first")
+    assert again.engine.store.head()["king"]["repo"] == "m/one"
+    assert again.step(chain=FakeChain()).outcome == "idle"
+
+
+def test_a_store_that_published_its_own_history_stops_rather_than_overwrite(
+    tmp_path, remote, hub_of, monkeypatch
+):
+    from robotensor.lanes.base import FAILED
+
+    hub_of({f"m/one@{A}": {"model.safetensors": "w1"}, f"m/two@{B}": {"model.safetensors": "w2"}})
+    stray = host(tmp_path / "stray")
+    stray.intake([c("hk2", "m/two", B, 20)], 30)
+    monkeypatch.setattr(stray.engine, "run", crowning_run(stray, []))
+    stray.step(chain=FakeChain())
+
+    remote["files"] = {}
+    first = host(tmp_path / "first")
+    first.intake([c("hk1", "m/one", A, 10)], 30)
+    monkeypatch.setattr(first.engine, "run", crowning_run(first, []))
+    first.step(chain=FakeChain())
+
+    progress = stray.step(chain=FakeChain())
+    assert progress.outcome == FAILED and "disagree" in progress.detail

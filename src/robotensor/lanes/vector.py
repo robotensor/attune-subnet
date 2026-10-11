@@ -180,6 +180,9 @@ class VectorLane:
         kept = read_json(store.validator_path(LANE))
         if not isinstance(kept, dict) or not isinstance(kept.get("entries"), dict):
             return
+        now = self.state.peek(LANE)
+        if now == kept or (now["entries"] and not taken):
+            return
         with self._lock, self.state.writing(LANE) as doc:
             if doc == kept or (doc["entries"] and not taken):
                 return
@@ -220,6 +223,7 @@ class VectorLane:
 
         entries = self.state.lane(LANE)["entries"]
         changed = []
+        published: dict[str, str] | None = None
         for c in sorted(commitments, key=lambda c: (c.block, c.hotkey)):
             try:
                 sub = commitment_.parse(c.data)
@@ -243,8 +247,14 @@ class VectorLane:
                 "reason": "",
                 "submitted": True,
             }
+            if published is None:
+                published = self._published()
             spent = self._submission_of(c.hotkey, besides=key)
-            if spent is not None:
+            if key in published:
+                # The store duelled it before this lane's state knew of it: a state lost with the
+                # host that kept it. It is not queued again.
+                record.update(status=published[key], reason="published before this state knew it")
+            elif spent is not None:
                 record.update(
                     status="refused",
                     reason=f"this hotkey has made its one submission ({spent})",
@@ -255,6 +265,34 @@ class VectorLane:
         if changed:
             self.state.save()
         return changed
+
+    def _published(self) -> dict[str, str]:
+        """What the store's index says became of each submission it names: `crowned` (a genesis,
+        or a challenger that won), `duelled` (one that lost) or `vacated`, the latest of them."""
+        from vector_orchestrator.ids import submission_key
+
+        out: dict[str, str] = {}
+        for record in self.engine.store.iter_index():
+            kind = record.get("kind")
+            if kind == "duel":
+                ref, status = (
+                    record.get("challenger"),
+                    ("crowned" if record.get("dethroned") else "duelled"),
+                )
+            elif kind == "genesis":
+                ref, status = record.get("king"), "crowned"
+            elif kind == "vacate":
+                ref, status = record.get("king"), VACATED
+            else:
+                continue
+            if not isinstance(ref, dict):
+                continue
+            key = ref.get("key")
+            if not key and ref.get("repo") and ref.get("revision"):
+                key = submission_key(ref["repo"], ref["revision"])
+            if key:
+                out[key] = status
+        return out
 
     def _submission_of(self, hotkey: str, *, besides: str) -> str | None:
         """The key of the submission `hotkey` has made, other than `besides`: an entry that reached
@@ -269,6 +307,7 @@ class VectorLane:
     def queue(self) -> list[Entry]:
         """The entries waiting for a duel, oldest commitment first. The one being duelled is still
         queued until its duel ends."""
+        self.engine  # noqa: B018 - built first, for the state it takes up
         with self._lock:
             lane = self.state.lane(LANE)
             waiting = [
@@ -588,9 +627,11 @@ class VectorLane:
         vacated as king."""
         from vector_orchestrator.ids import submission_key
 
+        # The index first: building the engine takes the store and the lane's state up from the
+        # mirror, and the hotkeys must be read after that.
+        index = list(self.engine.store.iter_index())
         with self._lock:
             entries = dict(self.state.lane(LANE)["entries"])
-        index = list(self.engine.store.iter_index())
         vacated = {
             (record.get("king") or {}).get("key")
             for record in index

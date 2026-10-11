@@ -56,6 +56,11 @@ class State:
             self._docs[name] = doc
         return doc
 
+    def peek(self, name: str) -> dict[str, Any]:
+        """The lane's document as it is on disk now, neither cached nor locked: for a look that
+        decides whether to write at all."""
+        return self._read(self.path(name))
+
     def save(self) -> None:
         """Write every document this object has touched, each atomically under its own lock."""
         for name, doc in self._docs.items():

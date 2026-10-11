@@ -704,3 +704,50 @@ def test_a_store_that_published_its_own_history_stops_rather_than_overwrite(
 
     progress = stray.step(chain=FakeChain())
     assert progress.outcome == FAILED and "disagree" in progress.detail
+
+
+def published_by_a_first_host(tmp_path, hub_of, monkeypatch):
+    """hk1's m/one crowned by genesis, hk2's m/two waiting, as a first host left the mirror."""
+    hub_of({f"m/one@{A}": {"model.safetensors": "w1"}, f"m/two@{B}": {"model.safetensors": "w2"}})
+    first = host(tmp_path / "first")
+    first.intake([c("hk1", "m/one", A, 10), c("hk2", "m/two", B, 20)], 30)
+    monkeypatch.setattr(first.engine, "run", crowning_run(first, []))
+    first.step(chain=FakeChain())
+    return first
+
+
+def test_the_first_thing_a_new_host_reads_is_already_the_mirrors(
+    tmp_path, remote, hub_of, monkeypatch
+):
+    """The weights thread's first look on a new host: the champions, before anything else built
+    the engine. Read before the take-up, hk1's place would burn."""
+    published_by_a_first_host(tmp_path, hub_of, monkeypatch)
+    assert host(tmp_path / "weights").champions() == ["hk1"]
+    assert [e.hotkey for e in host(tmp_path / "queue").queue()] == ["hk2"]
+
+
+def test_a_mirror_kept_before_the_lane_state_was_does_not_duel_its_entries_again(
+    tmp_path, remote, hub_of, monkeypatch
+):
+    """A dataset published before `validator/vector.json` existed: the index alone says m/one was
+    crowned, so taking it in from the chain again crowns rather than queues it."""
+    published_by_a_first_host(tmp_path, hub_of, monkeypatch)
+    del remote["files"]["validator/vector.json"]
+
+    second = host(tmp_path / "second")
+    second.intake([c("hk1", "m/one", A, 10), c("hk2", "m/two", B, 20)], 50)
+    assert statuses(second) == {"hk1": "crowned", "hk2": "queued"}
+    assert second.champions() == ["hk1"]
+    (again,) = second.intake([c("hk1", "m/three", C, 40)], 60)
+    assert again.status == "refused"
+
+
+def test_a_lane_level_with_its_mirror_writes_no_state(tmp_path, remote, hub_of, monkeypatch):
+    first = published_by_a_first_host(tmp_path, hub_of, monkeypatch)
+
+    def no(self, name):
+        raise AssertionError("the lane's state was written")
+
+    monkeypatch.setattr(State, "writing", no)
+    first.sync()
+    host(tmp_path / "first").engine  # noqa: B018 - a restart on the same host

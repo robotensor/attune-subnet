@@ -17,8 +17,8 @@ first owns the weights.
 
 Each hotkey makes one submission: once a commitment of yours is queued, anything else the hotkey
 commits is refused, before its duel and after it - even if its repository is then skipped. Check the
-weights (`check`) before you commit, and keep the repository up: a king whose repository is gone is
-dethroned, and its share of the emission is burned.
+weights (`check`) before you commit, and keep the repository up: a champion whose repository is
+gone loses its place for good (a king, its crown too), and the next older champion takes it.
 """
 
 from __future__ import annotations

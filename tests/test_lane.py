@@ -478,72 +478,167 @@ def test_copied_weights_are_a_duplicate_and_the_earliest_commitment_keeps_them(
     assert [r.challenger.repo for r in asked] == ["m/orig"]
 
 
-def crown(lane, repo, sha):
-    """Publish a genesis crowning `repo@sha` in the lane's real store."""
+def history(lane, *names):
+    """Crown `names` in that order, oldest first - a genesis, then a duel won by each next one -
+    each committed by the hotkey `hk-<name>`; their refs, oldest first."""
     from vector_orchestrator.ids import SubmissionRef
     from vector_orchestrator.store.records import index_record
 
-    ref = SubmissionRef.make(repo, sha)
-    record = index_record(
-        event_id="g" * 64, kind="genesis", block=1, finished_at="t0", king=ref.as_dict(),
-        challenger=None, king_score=0.5, challenger_score=None, dethroned=False, units=[],
-    )  # fmt: skip
-    lane.engine.store.write_event({"event_id": record["event_id"]})
-    lane.engine.store.append(record)
-    return ref
+    shas = {name: f"{n:x}" * 40 for n, name in enumerate(names, start=1)}
+    lane.intake(
+        [
+            c(f"hk-{name}", f"m/{name}", sha, 10 + n, name)
+            for n, (name, sha) in enumerate(shas.items())
+        ],
+        100,
+    )
+    for record in lane.state.lane("vector")["entries"].values():
+        record["status"] = "crowned"
+    refs, king = [], None
+    for n, (name, sha) in enumerate(shas.items(), start=1):
+        ref = SubmissionRef.make(f"m/{name}", sha)
+        record = index_record(
+            event_id=f"{n:064x}", kind="duel" if king else "genesis", block=n,
+            finished_at=f"t{n}", king=(king or ref).as_dict(),
+            challenger=ref.as_dict() if king else None, king_score=0.5,
+            challenger_score=0.6 if king else None, dethroned=king is not None, units=[],
+        )  # fmt: skip
+        lane.engine.store.write_event({"event_id": record["event_id"]})
+        lane.engine.store.append(record)
+        refs.append(ref)
+        king = ref
+    return refs
 
 
-def test_a_king_whose_repository_is_gone_is_vacated_and_its_place_burns(lane, hub_of, monkeypatch):
-    from robotensor.lanes.base import WORKED
+def on_the_hub(hub_of, refs):
+    """A Hub that shows `refs`, and nothing else."""
+    return hub_of({r.entry: {"model.safetensors": r.repo.split("/")[1]} for r in refs})
+
+
+def watched(lane, times):
+    """`times` looks at the champions, one after another; whether the last found one gone."""
+    return [lane.watch(every=0) for _ in range(times)][-1]
+
+
+def test_gone_champions_leave_the_pool_and_the_crown_returns_to_the_previous_king(lane, hub_of):
+    """The king history, newest first, is A B C D E F; A's and D's repositories are deleted. B,
+    C, E and F are paid, and B is king again."""
+    from robotensor.lanes import vector
     from robotensor.protocol import weights as weights_
 
+    f, e, d, c_, b, a = history(lane, "f", "e", "d", "c", "b", "a")
+    on_the_hub(hub_of, [b, c_, e, f])
+    hk = {r.repo.split("/")[1]: f"hk-{r.repo.split('/')[1]}" for r in (a, b, c_, d, e, f)}
+    assert lane.champions() == [hk[x] for x in "abcdef"]
+
+    # Missing once or twice is not gone yet: the pool stays as it was.
+    assert watched(lane, vector.MISSES - 1) is False
+    assert lane.champions() == [hk[x] for x in "abcdef"]
+    # Missing MISSES times in a row is gone: out of the pool at once, before the store says so.
+    assert watched(lane, 1) is True
+    assert lane.champions() == [hk[x] for x in "bcef"]
+    assert [p["hotkey"] for p in lane.paid()] == [hk[x] for x in "bcef"]
+    assert [p["share"] for p in lane.paid()] == [0.4, 0.3, 0.2, 0.1]
+    assert "burned" not in lane.paid()[0]
+    assert lane.engine.store.head()["king"] == a.as_dict()
+
+    # Recorded in the store between duels: A vacated with B its successor, D retired.
+    assert sorted(lane.strike()) == sorted([a.key, d.key])
+    kinds = [(r["kind"], r["king"]["repo"]) for r in lane.engine.store.iter_index()][-2:]
+    assert kinds == [("vacate", "m/a"), ("retire", "m/d")]
+    assert lane.engine.store.head()["king"] == b.as_dict()
+    assert lane.champions() == [hk[x] for x in "bcef"]
+    status = statuses(lane)
+    assert (status["hk-a"], status["hk-d"], status["hk-b"]) == ("vacated", "retired", "crowned")
+    assert lane.strike() == []  # nothing more to record
+
+    uids = {hk[x]: n for n, x in enumerate("abcdef", start=1)}
+    vector_ = weights_.weight_vector([weights_.Lane("vector", 0.3, lane.champions())], uids, 0)
+    assert vector_ == pytest.approx({0: 0.7, 2: 0.12, 3: 0.09, 5: 0.06, 6: 0.03})
+
+
+def test_the_watch_looks_no_further_than_a_full_pool(lane, hub_of, monkeypatch):
+    from robotensor import hub
+
+    refs = history(lane, "f", "e", "d", "c", "b", "a")
+    on_the_hub(hub_of, refs)
+    looked = []
+    inspect = hub.inspect
+    monkeypatch.setattr(
+        hub, "inspect", lambda repo, *a, **kw: looked.append(repo) or inspect(repo, *a, **kw)
+    )
+    assert lane.watch(every=0) is False
+    assert looked == ["m/a", "m/b", "m/c", "m/d"]
+    # A second look within the minute is not made.
+    assert lane.watch() is False and len(looked) == 4
+
+
+def test_a_repository_seen_again_before_it_is_gone_starts_its_count_over(lane, hub_of):
+    from robotensor.lanes import vector
+
+    (one,) = history(lane, "one")
+    on_the_hub(hub_of, [])
+    watched(lane, vector.MISSES - 1)
+    on_the_hub(hub_of, [one])
+    watched(lane, 1)
+    on_the_hub(hub_of, [])
+    assert watched(lane, vector.MISSES - 1) is False
+    assert lane.champions() == ["hk-one"]
+
+
+def test_a_hub_that_does_not_answer_counts_neither_way(lane, hub_of, monkeypatch):
+    from robotensor import hub
+    from robotensor.lanes import vector
+
+    (one,) = history(lane, "one")
+    on_the_hub(hub_of, [])
+    watched(lane, vector.MISSES - 1)
+    missing = hub.inspect
+
+    def down(*a, **kw):
+        raise hub.HubUnreachable("503")
+
+    monkeypatch.setattr(hub, "inspect", down)
+    assert watched(lane, 5) is False
+    assert lane.champions() == ["hk-one"] and lane.strike() == []
+    monkeypatch.setattr(hub, "inspect", missing)
+    assert watched(lane, 1) is True
+    assert lane.champions() == []
+
+
+def test_a_king_gone_with_no_earlier_king_left_leaves_the_throne_to_the_next_entry(
+    lane, hub_of, monkeypatch
+):
+    from robotensor.lanes import vector
+    from robotensor.lanes.base import WORKED
+
+    (one,) = history(lane, "one")
+    lane.intake([c("hk2", "m/two", B, 120)], 130)
     hub_of({f"m/two@{B}": {"model.safetensors": "w2"}})
-    lane.intake([c("hk1", "m/one", A, 10)], 30)
-    lane.state.lane("vector")["entries"][next(iter(lane.state.lane("vector")["entries"]))][
-        "status"
-    ] = "crowned"
-    crown(lane, "m/one", A)
-    lane.intake([c("hk2", "m/two", B, 20)], 30)
+    watched(lane, vector.MISSES - 1)
+    monkeypatch.setattr(vector, "WATCH_S", 0)
     asked = []
     monkeypatch.setattr(lane.engine, "run", genesis_run(asked))
 
+    # The step's own look is the last miss: the king is vacated, and the throne left empty.
     progress = lane.step(chain=FakeChain())
 
-    # The king is gone from the Hub: vacated, and the challenger takes the empty throne by genesis.
-    kinds = [r["kind"] for r in lane.engine.store.iter_index()]
-    assert kinds == ["genesis", "vacate"]
+    assert [r["kind"] for r in lane.engine.store.iter_index()] == ["genesis", "vacate"]
+    assert lane.engine.store.head()["king"] is None
     assert progress.outcome == WORKED
     (req,) = asked
     assert req.king is None and req.challenger.repo == "m/two"
-    assert statuses(lane) == {"hk1": "vacated", "hk2": "crowned"}
-    # Its place among the champions holds, and its part goes to the burn UID.
-    assert lane.champions() == [weights_.BURNED]
-    (paid,) = lane.paid()
-    assert paid["hotkey"] == "hk1" and paid["burned"] is True
-    vector = weights_.weight_vector(
-        [weights_.Lane("vector", 0.3, lane.champions())], {"hk1": 1, "owner": 0}, 0
-    )
-    assert vector == {0: 1.0}
+    assert statuses(lane) == {"hk-one": "vacated", "hk2": "crowned"}
 
 
 def test_a_king_still_on_the_hub_keeps_the_crown(lane, hub_of):
-    hub_of({f"m/one@{A}": {"model.safetensors": "w1"}})
-    crown(lane, "m/one", A)
-    assert lane.check_king() is None
-    assert lane.engine.store.head()["king"]["repo"] == "m/one"
+    from robotensor.lanes import vector
 
-
-def test_a_king_is_vacated_when_the_hub_does_not_answer(lane, monkeypatch):
-    from robotensor import hub
-
-    crown(lane, "m/one", A)
-
-    def down(*a, **kw):
-        raise hub.HubUnreachable("timeout")
-
-    monkeypatch.setattr(hub, "inspect", down)
-    assert "timeout" in lane.check_king()
-    assert lane.engine.store.head()["king"] is None
+    (one,) = history(lane, "one")
+    on_the_hub(hub_of, [one])
+    assert watched(lane, vector.MISSES) is False
+    assert lane.strike() == []
+    assert lane.engine.store.head()["king"] == one.as_dict()
 
 
 # -- another host takes the lane up from the mirror -----------------------------------------------

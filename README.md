@@ -40,12 +40,14 @@ The Hub is checked when an entry's turn comes, not when it is queued.
 - **Challenger missing.** If the Hub doesn't show the challenger's repo when its turn comes
   (deleted, still private, or the revision is gone), it is dropped as `missing` and the validator
   duels the next entry in the queue. The hotkey's one submission is used up.
-- **King missing.** Before every duel, the validator checks that the king's repo is still on the
-  Hub. If it is gone, the king is dethroned without a duel (a `vacate` record in the result store)
-  and the next entry takes the empty throne. The dethroned king's champion place stays, but its
-  share of the emission is **burned**.
-- **Hub unreachable.** A Hub that doesn't answer counts as a missing repo, for the challenger and
-  for the king alike.
+- **Champion missing.** About once a minute, even while a duel runs, the validator checks that
+  the king and every paid champion are still on the Hub. A repo the Hub says is missing three
+  checks in a row is gone, and it stops being paid at once: the next older champion moves up into
+  its place. At the next step it is recorded in the result store. A gone king is dethroned without a
+  duel (a `vacate` record) and the crown goes back to the newest earlier king still on the Hub. Any
+  other gone champion is struck off (a `retire` record). Neither is undone if the repo comes back.
+- **Hub unreachable.** A Hub that doesn't answer counts as a missing repo for a challenger. For a
+  champion it counts neither way: it says nothing about the repo.
 
 Submissions are weights only. Nothing a miner uploads is executed or unpickled: the safetensors
 header is checked against the pinned architecture before any tensor is read. Weights that don't
@@ -78,7 +80,7 @@ attune miner submit --dir submission/ --repo <you>/vector-mine \
 `submit` uploads to a private repo, commits on chain, then makes the repo public right away. The
 earliest commitment of a given set of weights wins, so commit before you publish, but don't leave
 the repo private: a repo the validator can't see at its turn is dropped as missing. Keep the repo up while you
-hold a place: a king whose repo is gone is dethroned and its share is burned.
+hold a place: a champion whose repo is gone loses its place for good.
 
 Check your entry with:
 

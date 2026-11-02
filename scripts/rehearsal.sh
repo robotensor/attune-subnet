@@ -9,7 +9,7 @@
 #
 #   KING=owner/name@<sha> CHALLENGER=owner/name@<sha> bash scripts/rehearsal.sh
 #
-# Needs config/localnet.toml's environments (simulator, policy) and HF_TOKEN with read access.
+# Needs config/localnet.toml's environments (simulator, policy) and HF_TOKEN: the validator account's, which the two repos must be gated to (or uploaded with --no-gate).
 # A duel (160 units a side) takes hours on one GPU; the genesis (one side) about half as long.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."

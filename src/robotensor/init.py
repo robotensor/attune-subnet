@@ -38,13 +38,13 @@ MINER_NEXT = """\
 A submission is weights and nothing else. Three commands, in this order:
 
     attune miner check  --dir {directory}/submission
-    attune miner upload --dir {directory}/submission --repo <you>/<name> --private
+    attune miner upload --dir {directory}/submission --repo <you>/<name>
     attune miner commit --repo <you>/<name> --revision <the sha upload printed> \\
         --netuid <N> --network test --wallet.name <w> --wallet.hotkey <h>
 
-Then make the repository public. Committing while it is private is what keeps your weights from
-being copied and committed by somebody else first: the earliest commitment of a set of weights
-keeps them.
+`upload` gates the repository and lets the validator's account in before uploading: nobody else
+can take your weights. Keep the repository that way until the validator has downloaded it, which
+happens when its turn comes.
 
 This subnet charges nothing to submit.
 """

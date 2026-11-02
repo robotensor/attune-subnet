@@ -77,10 +77,10 @@ attune miner submit --dir submission/ --repo <you>/vector-mine \
     --network finney --netuid <N> --wallet.name miner --wallet.hotkey default
 ```
 
-`submit` uploads to a private repo, commits on chain, then makes the repo public right away. The
-earliest commitment of a given set of weights wins, so commit before you publish, but don't leave
-the repo private: a repo the validator can't see at its turn is dropped as missing. Keep the repo up while you
-hold a place: a champion whose repo is gone loses its place for good.
+`submit` creates the repo gated (manual approval), lets the validator's account in, uploads, then
+commits on chain. Nobody else can download your weights; if you are crowned, the validator publishes
+them in its kings repo. The repo must be downloadable by the validator at the one moment its turn
+comes: a repo it can't download then is dropped as missing.
 
 Check your entry with:
 

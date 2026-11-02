@@ -89,7 +89,7 @@ def test_init_will_not_write_over_a_config(tmp_path):
         validator(tmp_path / "node")
 
 
-def test_submit_is_one_command_in_the_order_that_keeps_weights_yours():
+def test_submit_is_one_command_gated_to_the_validator():
     parser = build_parser()
 
     args = parser.parse_args(
@@ -109,7 +109,27 @@ def test_submit_is_one_command_in_the_order_that_keeps_weights_yours():
         ]
     )
 
-    assert args.command == "submit" and not args.keep_private
+    assert args.command == "submit" and args.validator_user is None and not args.no_gate
+    from robotensor import miner
+
+    assert miner.gate_to(args) == ["angelecho"]
+
+
+def test_more_validator_accounts_are_let_in_when_given_and_no_gate_says_so(capsys):
+    import argparse
+
+    from robotensor import miner
+
+    parser = argparse.ArgumentParser()
+    miner.add_subcommands(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(
+        ["upload", "--dir", "s/", "--repo", "me/mine", "--validator-user", "a", "--validator-user", "b"]
+    )  # fmt: skip
+    assert miner.gate_to(args) == ["a", "b"]
+
+    args = parser.parse_args(["upload", "--dir", "s/", "--repo", "me/mine", "--no-gate"])
+    assert miner.gate_to(args) == []
+    assert "open" in capsys.readouterr().err
 
 
 def test_status_reads_the_commitment_back_from_the_hub(monkeypatch, capsys):

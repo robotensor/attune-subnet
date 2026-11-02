@@ -8,23 +8,25 @@
              commitment on the subnet (`vector:<repo>@<commit>.<digest>`)
     status   your hotkey's commitment on chain, and what the Hub shows for it
 
-Order matters for copy protection: upload to a PRIVATE repository, commit the sha on chain, then
-make the repository public - at once: the validator queues a commitment as soon as it reads it and
-looks the repository up on the Hub when its turn comes, and a repository it cannot see then (still
-private, gone, or the Hub not answering) is dropped as missing and the next entry duels instead. Weights byte-identical to an earlier
-commitment's are refused as a duplicate, and the earlier commitment keeps them, so whoever commits
-first owns the weights.
+Your repository is gated: `upload` and `submit` create it with manual access approval and let
+the validator's account (`hub.VALIDATOR_USER`, or each `--validator-user` given) in before a byte
+is uploaded, and read the Hub's accepted list back to be sure, so nobody else can take your
+weights. The validator looks your repository up when its turn comes and downloads the weights
+then - that is the one moment it must answer: a repository it cannot download (deleted, private,
+gated without the validator let in) is dropped as missing and the next entry duels instead; a
+Hub that does not answer is asked again a few times first. From then on the duel runs
+on the validator's copy, and a crowned model's weights are published by the validator itself,
+with the three kings before it. Weights byte-identical to an earlier commitment's are refused as a
+duplicate, and the earlier commitment keeps them.
 
 Each hotkey makes one submission: once a commitment of yours is queued, anything else the hotkey
 commits is refused, before its duel and after it - even if its repository is then skipped. Check the
-weights (`check`) before you commit, and keep the repository up: a champion whose repository is
-gone loses its place for good (a king, its crown too), and the next older champion takes it.
+weights (`check`) before you commit.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import sys
@@ -39,11 +41,7 @@ DEFAULT_NETWORK = "test"
 
 def weights_digest(path: Path) -> str:
     """The sha256 of the weights file, as the commitment names it."""
-    digest = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            digest.update(block)
-    return digest.hexdigest()
+    return hub.sha256_of(path)
 
 
 def cmd_check(args: argparse.Namespace) -> int:
@@ -65,19 +63,43 @@ def cmd_check(args: argparse.Namespace) -> int:
     return 0 if report.ok else 1
 
 
-def cmd_upload(args: argparse.Namespace) -> int:
-    weights = Path(args.dir) / hub.WEIGHTS_FILE if Path(args.dir).is_dir() else Path(args.dir)
-    if not weights.is_file():
-        print(f"error: no {hub.WEIGHTS_FILE} at {weights}", file=sys.stderr)
-        return 2
+def gate_to(args: argparse.Namespace) -> list[str]:
+    """The accounts a submission is gated to: `--validator-user` as given, else the validator's;
+    none with `--no-gate`, which is said out loud, as it leaves the weights open to everyone."""
+    if args.no_gate:
+        print(
+            "warning: --no-gate: the repository is left open, anyone can take the weights",
+            file=sys.stderr,
+        )
+        return []
+    return list(args.validator_user or [hub.VALIDATOR_USER])
+
+
+def _upload(args: argparse.Namespace, weights: Path) -> tuple[str, list[str]]:
+    """The weights (and README) uploaded, gated as `args` say: the commit sha, and who is let
+    in. `hub.NotLetIn` when the Hub would not let an account in: nothing uploaded."""
+    users = gate_to(args)
     readme = Path(args.readme).read_text(encoding="utf-8") if args.readme else None
     sha = hub.upload_weights(
         args.repo,
         str(weights),
         token=os.environ.get("HF_TOKEN"),
-        private=args.private,
+        gate_to=users or None,
         readme=readme,
     )
+    return sha, users
+
+
+def cmd_upload(args: argparse.Namespace) -> int:
+    weights = Path(args.dir) / hub.WEIGHTS_FILE if Path(args.dir).is_dir() else Path(args.dir)
+    if not weights.is_file():
+        print(f"error: no {hub.WEIGHTS_FILE} at {weights}", file=sys.stderr)
+        return 2
+    try:
+        sha, users = _upload(args, weights)
+    except hub.NotLetIn as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     digest = weights_digest(weights)
     print(
         json.dumps(
@@ -85,8 +107,11 @@ def cmd_upload(args: argparse.Namespace) -> int:
                 "repo": args.repo,
                 "revision": sha,
                 "digest": digest,
+                "gated": bool(users),
+                "granted": users,
                 "commitment": commitment_.encode(args.repo, sha, digest),
-            }
+            },
+            indent=1,
         )
     )
     return 0
@@ -108,19 +133,21 @@ def cmd_commit(args: argparse.Namespace) -> int:
 
 
 def cmd_submit(args: argparse.Namespace) -> int:
-    """check -> upload private -> commit on chain -> publish, in the order that keeps your
-    weights yours: the earliest commitment of a set of weights keeps them, so nobody may see the
-    file until the chain says it is yours."""
+    """check -> upload to a repository gated to the validator -> commit on chain. The weights
+    are never open: the validator alone downloads them, and publishes them if they are crowned."""
     from . import chain as chain_
 
     if cmd_check(args) != 0:
         print("error: the weights did not pass the check the validator runs", file=sys.stderr)
         return 1
     weights = Path(args.dir) / hub.WEIGHTS_FILE if Path(args.dir).is_dir() else Path(args.dir)
-    readme = Path(args.readme).read_text(encoding="utf-8") if args.readme else None
-    token = os.environ.get("HF_TOKEN")
-    sha = hub.upload_weights(args.repo, str(weights), token=token, private=True, readme=readme)
-    data = commitment_.encode(args.repo, sha, weights_digest(weights))
+    try:
+        sha, users = _upload(args, weights)
+    except hub.NotLetIn as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    digest = weights_digest(weights)
+    data = commitment_.encode(args.repo, sha, digest)
     wallet = chain_.wallet(args.wallet_name, args.wallet_hotkey, args.wallet_path)
     chain = chain_.Chain(args.network, args.netuid)
     try:
@@ -128,20 +155,17 @@ def cmd_submit(args: argparse.Namespace) -> int:
         block = chain.block()
     finally:
         chain.close()
-    published = False
-    if not args.keep_private:
-        from huggingface_hub import HfApi
-
-        HfApi(token=token).update_repo_settings(args.repo, private=False)
-        published = True
     print(
         json.dumps(
             {
                 "repo": args.repo,
                 "revision": sha,
+                "digest": digest,
+                "gated": bool(users),
+                "granted": users,
+                "hotkey": wallet.hotkey.ss58_address,
                 "committed": data,
                 "block": block,
-                "public": published,
                 "fee": "none: this subnet charges nothing to submit",
             },
             indent=1,
@@ -179,6 +203,23 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _gate_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--validator-user",
+        action="append",
+        default=None,
+        help=(
+            f"a Hub account let into your gated repository (default {hub.VALIDATOR_USER}); "
+            "may be given more than once"
+        ),
+    )
+    parser.add_argument(
+        "--no-gate",
+        action="store_true",
+        help="leave the repository open to everyone (for a public test submission)",
+    )
+
+
 def _chain_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--network", default=DEFAULT_NETWORK, help="finney, test, or ws://host:port"
@@ -203,7 +244,7 @@ def add_subcommands(sub: Any) -> None:
         "--repo", required=True, help="your Hugging Face model repository, owner/name"
     )
     upload.add_argument("--readme", default=None, help="a README.md to upload beside it")
-    upload.add_argument("--private", action="store_true", help="create the repository private")
+    _gate_args(upload)
     upload.set_defaults(func=cmd_upload)
 
     commit = sub.add_parser("commit", help="commit repo@sha on chain for your hotkey")
@@ -221,18 +262,14 @@ def add_subcommands(sub: Any) -> None:
     commit.set_defaults(func=cmd_commit)
 
     submit = sub.add_parser(
-        "submit", help="check, upload private, commit on chain, then publish - in that order"
+        "submit", help="check, upload gated to the validator, then commit on chain"
     )
     submit.add_argument(
         "--dir", required=True, help="the directory holding model.safetensors, or the file"
     )
     submit.add_argument("--repo", required=True, help="your Hugging Face model repository")
     submit.add_argument("--readme", default=None, help="a README.md to upload beside it")
-    submit.add_argument(
-        "--keep-private",
-        action="store_true",
-        help="leave the repository private; the validator drops it as missing at its turn",
-    )
+    _gate_args(submit)
     _chain_args(submit)
     submit.add_argument("--wallet.name", dest="wallet_name", required=True)
     submit.add_argument("--wallet.hotkey", dest="wallet_hotkey", required=True)

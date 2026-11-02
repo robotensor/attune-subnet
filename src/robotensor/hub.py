@@ -21,15 +21,29 @@ import fnmatch
 import hashlib
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 WEIGHTS_FILE = "model.safetensors"
+#: The Hub account the validators download with. A miner's repository is gated, with access
+#: granted to this account alone, so that nobody else can take the weights before they are crowned.
+VALIDATOR_USER = "angelecho"
 #: A hashed file the Hub cannot give a sha256 for is fetched when it is no larger than this.
 FETCH_MAX_BYTES = 1 << 20
 
 
+def sha256_of(path: str | Path) -> str:
+    """The sha256 of a file, read a megabyte at a time."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 class NotVisible(RuntimeError):
-    """The Hub will not show the repository at that commit (missing, private, or a bad sha)."""
+    """The Hub will not give this token the repository at that commit (missing, private, gated
+    without this account let in, or a bad sha)."""
 
 
 class HubUnreachable(NotVisible):
@@ -39,6 +53,11 @@ class HubUnreachable(NotVisible):
 
 class NotASubmission(ValueError):
     """The repository holds what this competition's submission may not, or lacks what it must."""
+
+
+class NotLetIn(RuntimeError):
+    """The Hub did not let the validator's account into the repository: an account it does not
+    know, or a token that may not grant. Nothing was uploaded."""
 
 
 @dataclass(frozen=True)
@@ -242,21 +261,68 @@ def inspect(
     )
 
 
+def accessible(repo: str, *, api: Any = None, token: str | None = None) -> None:
+    """That `token` may download `repo`'s files: nothing. `NotVisible` when the Hub says it may
+    not (gated and this account not let in, private, missing); `HubUnreachable` when the Hub did
+    not answer. The metadata `inspect` reads is public even for a gated repository, so this is
+    the question `inspect` cannot answer."""
+    from huggingface_hub import HfApi
+    from huggingface_hub.errors import GatedRepoError, HfHubHTTPError, RepositoryNotFoundError
+
+    api = api or HfApi(token=token or None)
+    try:
+        api.auth_check(repo, repo_type="model", token=token or None)
+    except (GatedRepoError, RepositoryNotFoundError) as exc:
+        raise NotVisible(
+            f"{repo}: {type(exc).__name__}: this account may not download it"
+        ) from None
+    except HfHubHTTPError as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in (401, 403, 404):
+            raise NotVisible(f"{repo}: {exc}") from None
+        raise HubUnreachable(f"{repo}: {exc}") from None
+    except OSError as exc:
+        raise HubUnreachable(f"{repo}: {type(exc).__name__}: {exc}") from None
+
+
 def upload_weights(
     repo: str,
     weights: str,
     *,
     token: str | None = None,
-    private: bool = False,
+    gate_to: str | Sequence[str] | None = VALIDATOR_USER,
     readme: str | None = None,
     message: str = "Upload model.safetensors",
 ) -> str:
     """Upload `weights` as the repository's `model.safetensors` (and a README if given), creating
-    the repository if needed; the commit sha of the upload."""
+    the repository if needed; the commit sha of the upload. With `gate_to` (one account or
+    several), the repository is gated (manual approval) and each account let in before a byte is
+    uploaded, so the weights are never open to anyone else; the Hub's list of accepted accounts
+    is read back, and `NotLetIn` raised - nothing uploaded - when one is not on it. None leaves
+    the repository as it is."""
     from huggingface_hub import CommitOperationAdd, HfApi
+    from huggingface_hub.errors import HfHubHTTPError
 
     api = HfApi(token=token or None)
-    api.create_repo(repo, repo_type="model", private=private, exist_ok=True)
+    api.create_repo(repo, repo_type="model", exist_ok=True)
+    users = [gate_to] if isinstance(gate_to, str) else list(gate_to or ())
+    if users:
+        api.update_repo_settings(repo, gated="manual", repo_type="model")
+        for user in users:
+            try:
+                api.grant_access(repo, user, repo_type="model")
+            except HfHubHTTPError as exc:
+                # 400: already let in, which the read-back below confirms. Anything else is the
+                # Hub refusing (a token that may not grant), and the upload must not go on.
+                if getattr(getattr(exc, "response", None), "status_code", None) != 400:
+                    raise
+        accepted = {
+            str(getattr(r, "username", ""))
+            for r in api.list_accepted_access_requests(repo, repo_type="model")
+        }
+        for user in users:
+            if user not in accepted:
+                raise NotLetIn(f"{repo}: {user} is not let in (the Hub lists {sorted(accepted)})")
     operations = [CommitOperationAdd(path_in_repo=WEIGHTS_FILE, path_or_fileobj=weights)]
     if readme is not None:
         operations.append(

@@ -127,3 +127,147 @@ def test_a_competition_that_takes_one_file_refuses_two():
 
     with pytest.raises(NotASubmission, match="takes one"):
         content_key([lfs("model.safetensors", b"a"), lfs("other.safetensors", b"b")], shape)
+
+
+def test_upload_gates_the_repository_and_lets_the_validator_in_before_a_byte_goes_up(
+    monkeypatch, tmp_path
+):
+    from types import SimpleNamespace
+
+    import huggingface_hub
+
+    from robotensor import hub
+
+    calls = []
+
+    class Api:
+        def __init__(self, token=None):
+            calls.append(("token", token))
+
+        def create_repo(self, repo, **kw):
+            calls.append(("create", repo, kw.get("private")))
+
+        def update_repo_settings(self, repo, **kw):
+            calls.append(("settings", repo, kw.get("gated")))
+
+        def grant_access(self, repo, user, **kw):
+            calls.append(("grant", repo, user))
+
+        def list_accepted_access_requests(self, repo, **kw):
+            calls.append(("accepted", repo))
+            return [SimpleNamespace(username=hub.VALIDATOR_USER)]
+
+        def create_commit(self, repo, operations, **kw):
+            calls.append(("commit", repo, [o.path_in_repo for o in operations]))
+            return SimpleNamespace(oid="c" * 40)
+
+    monkeypatch.setattr(huggingface_hub, "HfApi", Api)
+    (tmp_path / "model.safetensors").write_bytes(b"w")
+    sha = hub.upload_weights("me/mine", str(tmp_path / "model.safetensors"), token="t", readme="hi")
+
+    assert sha == "c" * 40
+    assert calls == [
+        ("token", "t"),
+        ("create", "me/mine", None),
+        ("settings", "me/mine", "manual"),
+        ("grant", "me/mine", hub.VALIDATOR_USER),
+        ("accepted", "me/mine"),
+        ("commit", "me/mine", ["model.safetensors", "README.md"]),
+    ]
+
+
+def _gating_api(monkeypatch, *, grant, accepted):
+    """An `HfApi` whose `grant_access` does `grant(user)` and whose accepted list is `accepted`;
+    the commits made."""
+    from types import SimpleNamespace
+
+    import huggingface_hub
+
+    commits = []
+
+    class Api:
+        def __init__(self, token=None):
+            pass
+
+        def create_repo(self, repo, **kw):
+            pass
+
+        def update_repo_settings(self, repo, **kw):
+            pass
+
+        def grant_access(self, repo, user, **kw):
+            grant(user)
+
+        def list_accepted_access_requests(self, repo, **kw):
+            return [SimpleNamespace(username=u) for u in accepted]
+
+        def create_commit(self, repo, operations, **kw):
+            commits.append([o.path_in_repo for o in operations])
+            return SimpleNamespace(oid="c" * 40)
+
+    monkeypatch.setattr(huggingface_hub, "HfApi", Api)
+    return commits
+
+
+def _http(status):
+    from types import SimpleNamespace
+
+    from huggingface_hub.errors import HfHubHTTPError
+
+    return HfHubHTTPError(
+        f"{status}", response=SimpleNamespace(status_code=status, headers={}, request=None)
+    )
+
+
+def test_a_repository_already_gated_to_the_account_is_not_an_error(monkeypatch, tmp_path):
+    """The Hub answers 400 to a grant already made; the accepted list shows the account."""
+    from robotensor import hub
+
+    def grant(user):
+        raise _http(400)
+
+    commits = _gating_api(monkeypatch, grant=grant, accepted=[hub.VALIDATOR_USER])
+    (tmp_path / "model.safetensors").write_bytes(b"w")
+    assert hub.upload_weights("me/mine", str(tmp_path / "model.safetensors")) == "c" * 40
+    assert commits == [["model.safetensors"]]
+
+
+def test_an_account_the_hub_does_not_let_in_stops_the_upload(monkeypatch, tmp_path):
+    """A misspelt account: the grant goes through or not, but the accepted list lacks it, and
+    nothing is uploaded."""
+    import pytest
+
+    from robotensor import hub
+
+    commits = _gating_api(monkeypatch, grant=lambda user: None, accepted=[])
+    (tmp_path / "model.safetensors").write_bytes(b"w")
+    with pytest.raises(hub.NotLetIn, match="angelecho is not let in"):
+        hub.upload_weights("me/mine", str(tmp_path / "model.safetensors"))
+    assert commits == []
+
+
+def test_a_token_that_may_not_grant_stops_the_upload(monkeypatch, tmp_path):
+    """A read-only token: the Hub refuses the grant with 403, and nothing is uploaded."""
+    import pytest
+    from huggingface_hub.errors import HfHubHTTPError
+
+    from robotensor import hub
+
+    def grant(user):
+        raise _http(403)
+
+    commits = _gating_api(monkeypatch, grant=grant, accepted=[])
+    (tmp_path / "model.safetensors").write_bytes(b"w")
+    with pytest.raises(HfHubHTTPError):
+        hub.upload_weights("me/mine", str(tmp_path / "model.safetensors"))
+    assert commits == []
+
+
+def test_every_account_given_is_let_in(monkeypatch, tmp_path):
+    from robotensor import hub
+
+    granted = []
+    commits = _gating_api(monkeypatch, grant=granted.append, accepted=["a", "b"])
+    (tmp_path / "model.safetensors").write_bytes(b"w")
+    hub.upload_weights("me/mine", str(tmp_path / "model.safetensors"), gate_to=["a", "b"])
+    assert granted == ["a", "b"] and commits == [["model.safetensors"]]

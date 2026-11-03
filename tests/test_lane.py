@@ -846,3 +846,133 @@ def test_a_lane_level_with_its_mirror_writes_no_state(tmp_path, remote, hub_of, 
     monkeypatch.setattr(State, "writing", no)
     first.sync()
     host(tmp_path / "first").engine  # noqa: B018 - a restart on the same host
+
+
+# -- the kings kept -------------------------------------------------------------
+
+
+def test_a_folder_that_is_not_a_kings_is_never_removed(tmp_path):
+    """Whatever the directory is pointed at, only a king's folder is this code's to drop."""
+    from robotensor.kings import Kings
+
+    root = tmp_path / "kings"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "code.py").write_text("x")
+    (root / "old").mkdir()
+    (root / "old" / "model.safetensors").write_text("w")
+    kings = Kings(root, api=SimpleNamespace())
+    kings.keep([], lambda m: None)
+    assert (root / "src" / "code.py").is_file() and not (root / "old").exists()
+    with pytest.raises(ValueError):
+        Kings("relative/kings")
+
+
+def test_weights_that_do_not_hash_to_what_the_duel_recorded_are_not_kept(tmp_path):
+    """A wrong copy - on the Hub, in a cache - is refused, and removed when it had been fetched
+    into `kings/`; the king is wanted again next time."""
+    import hashlib
+
+    from robotensor.kings import Kings
+
+    kings = Kings(tmp_path / "kings", "", api=object())
+    good = tmp_path / "good"
+    good.write_bytes(b"weights")
+    sha = hashlib.sha256(b"weights").hexdigest()
+    model = {"key": "a", "repo": "m/a", "revision": "1" * 40, "sha256": sha}
+
+    def from_hub(m):  # as `fetch_from_hub` does: straight into its place
+        fetched = kings.path(m["key"])
+        fetched.parent.mkdir(parents=True, exist_ok=True)
+        fetched.write_bytes(b"tampered")
+        return fetched
+
+    assert kings.keep([model], from_hub) == ["a"]
+    assert not kings.path("a").exists() and kings.manifest()["kings"][0]["weights"] is False
+
+    assert kings.keep([model], lambda m: good) == []
+    assert kings.path("a").read_bytes() == b"weights"
+    assert kings.manifest()["kings"][0]["sha256"] == sha
+
+
+def test_a_host_restored_from_the_hub_copy_takes_the_kings_without_uploading_them_again(tmp_path):
+    """`kings/` empty, the Hub copy ahead of it: the weights come down, and bringing the Hub
+    level is the manifest alone."""
+    from robotensor.kings import Kings
+
+    calls = []
+
+    class Api:
+        def hf_hub_download(self, repo, filename, repo_type=None, local_dir=None):
+            calls.append(("download", filename))
+            target = Path(local_dir) / filename
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"weights")
+            return str(target)
+
+        def create_repo(self, repo, **kw):
+            pass
+
+        def list_repo_files(self, repo, repo_type=None):
+            return ["kings.json", "a/model.safetensors"]
+
+        def create_commit(self, repo, operations, commit_message, repo_type=None):
+            calls.append(("commit", [o.path_in_repo for o in operations]))
+
+    kings = Kings(tmp_path / "kings", "v/kings", api=Api())
+    model = {"key": "a", "repo": "m/a", "revision": "1" * 40}
+    assert kings.keep([model], lambda m: kings.fetch_from_hub(m["key"])) == []
+    assert kings.path("a").read_bytes() == b"weights"
+    assert kings.publish() is True
+    assert calls == [("download", "a/model.safetensors"), ("commit", ["kings.json"])]
+
+
+def test_the_kings_hub_copy_is_brought_level_in_one_commit(tmp_path):
+    """Weights not there uploaded, folders no longer kept deleted, the manifest with them; and
+    nothing asked of the Hub while it already matches."""
+    from robotensor.kings import Kings
+
+    calls = []
+
+    class Api:
+        def create_repo(self, repo, **kw):
+            calls.append(("create", repo))
+
+        def list_repo_files(self, repo, repo_type=None):
+            return ["kings.json", "old/model.safetensors", "b/model.safetensors"]
+
+        def create_commit(self, repo, operations, commit_message, repo_type=None):
+            calls.append(("commit", [(type(o).__name__, o.path_in_repo) for o in operations]))
+
+    kings = Kings(tmp_path / "kings", "v/kings", api=Api())
+    (tmp_path / "w").write_text("weights")
+    newest = [{"key": k, "repo": f"m/{k}", "revision": "1" * 40} for k in ("a", "b")]
+    assert kings.keep(newest, lambda m: tmp_path / "w") == []
+
+    assert kings.publish() is True
+    assert calls == [
+        ("create", "v/kings"),
+        (
+            "commit",
+            [
+                ("CommitOperationAdd", "kings.json"),
+                ("CommitOperationAdd", "a/model.safetensors"),
+                ("CommitOperationDelete", "old/model.safetensors"),
+            ],
+        ),
+    ]
+    calls.clear()
+    assert kings.publish() is True and calls == []
+
+
+def test_a_hub_copy_that_cannot_be_written_is_tried_again_next_time(tmp_path):
+    from robotensor.kings import Kings
+
+    class Api:
+        def create_repo(self, repo, **kw):
+            raise OSError("no network")
+
+    kings = Kings(tmp_path / "kings", "v/kings", api=Api())
+    (tmp_path / "w").write_text("weights")
+    kings.keep([{"key": "a", "repo": "m/a", "revision": "1" * 40}], lambda m: tmp_path / "w")
+    assert kings.publish() is False
+    assert not (tmp_path / "kings" / "published.json").exists()

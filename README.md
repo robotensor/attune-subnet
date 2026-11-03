@@ -120,6 +120,7 @@ policy_python = "/abs/.venvs/vector-policy/bin/python"
 simulator_python = "/abs/.venvs/robotwin/bin/python"
 simulator_root = "/abs/RoboTwin-Vector"
 workers = 1   # units per GPU; one unit can use up to 34 GB
+kings_repo = "<validator-account>/vector-kings"   # public model repo the four kings are mirrored to
 ```
 
 ```bash

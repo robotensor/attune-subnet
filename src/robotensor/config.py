@@ -9,6 +9,8 @@
     simulator_python = "/abs/simulator-env/bin/python"
     simulator_root = "/abs/RoboTwin-Vector"
     mirror = "owner/vector-results"      # optional: the dataset the store is published to
+    kings_repo = "owner/vector-kings"    # optional: the public model repo the four kings are
+                                         # mirrored to; HF_TOKEN must be able to write it
     workers = 1                          # optional: units at once on each GPU, for its memory
     start_block = 4000000                # commitments made before this block are ignored; a
                                          # local chain may leave it out (0)
@@ -57,7 +59,12 @@ class VectorConfig(LaneConfig):
     simulator_root: str = ""
     #: A Hugging Face dataset the store is mirrored to; empty for none.
     mirror: str = ""
+    #: A public Hugging Face model repository the four kings' weights are mirrored to; empty keeps
+    #: them on this host alone.
+    kings_repo: str = ""
     store: Path = Path()
+    #: Where the four kings' weights are kept (`kings.Kings`): a directory of their own.
+    kings: Path = Path()
     run_dir: Path = Path()
     cache: Path = Path()
     #: Units run at once on each GPU of the lane's lease, each a simulator and a policy server:
@@ -70,7 +77,8 @@ class VectorConfig(LaneConfig):
 
 
 VECTOR_KEYS = (
-    "policy_python", "simulator_python", "simulator_root", "mirror", "workers", "start_block",
+    "policy_python", "simulator_python", "simulator_root", "mirror", "kings_repo", "workers",
+    "start_block",
 )  # fmt: skip
 
 
@@ -190,9 +198,11 @@ def _vector(
         simulator_python=os.path.expandvars(str(table["simulator_python"])),
         simulator_root=str(_path(root, table["simulator_root"])),
         mirror=str(table.get("mirror", "")),
+        kings_repo=str(table.get("kings_repo", "")),
         workers=workers,
         start_block=start_block,
         store=data / "vector" / "store",
+        kings=data / "vector" / "kings",
         run_dir=data / "vector" / "runs",
         cache=data / "vector" / "cache",
     )

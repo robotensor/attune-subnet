@@ -18,9 +18,11 @@ whatever became of it. Queued is spent, as one reveal is one shot.
 finalized head, which must come after the challenger's commitment (`protocol.seed`). Then, and only
 then, the challenger is looked up on the Hub (`hub.inspect`):
 
-- a repository the Hub does not show (deleted, private, a revision it does not have) is `missing`:
-  it leaves the queue and the next entry duels instead. A Hub that does not answer is the same as a
-  repository that is not there: nothing waits on it;
+- a repository the validator cannot download (deleted, private, gated without the validator let
+  in, a revision it does not have) is `missing`: it leaves the queue and the next entry duels
+  instead. That is the one moment a miner's repository must answer: once fetched, the duel runs
+  on the copy. A Hub that does not answer is asked again, `HUB_TRIES` times in all with at least
+  `HUB_GAP_S` between them, and then the entry is `missing` too;
 - a repository holding anything but the weights and a README, or weights that do not hash to the
   committed digest, is `refused`; weights byte-identical to an earlier entry's are a `duplicate`;
 The oldest admitted entry takes an empty throne by genesis, scored on its own units; otherwise it
@@ -29,16 +31,13 @@ challenger's average success rate beats the king's by the margin. The queue is w
 (`queue.json`) for the dashboard, and the orchestrator writes the duel's own progress beside it
 (`running.json`).
 
-**Champions whose repository is gone.** The king and every champion paid now are looked up on the
-Hub about once a minute (`watch`, from the step and from the refresh thread, so it goes on while a
-duel runs), walking the crowned models newest first until the pool is full of models still there.
-One the Hub says it does not show (deleted, private, the revision gone) `MISSES` times in a row is
-gone; a Hub that does not answer says nothing about a repository, and counts neither way. A gone
-model leaves the pool at once - the weights skip it and the next older champion moves up - and
-the store records it at the next step, between duels: a king is vacated and the crown returns to
-the newest earlier king still there (`Orchestrator.vacate` with a successor; with none, the throne
-is empty and the next entry takes it by genesis), any other champion is retired
-(`Orchestrator.retire`). Neither is undone, should the repository come back.
+**Kings kept.** Nothing asks a miner to keep a repository up once its duel ran: the four newest
+crowned models - the four the subnet pays - are the validator's to serve (`kings.Kings`). Their
+weights are kept under the lane's `kings/` and mirrored to the public `kings_repo`, brought level
+at every step. A king is fetched for its duels from the orchestrator's cache, where its own duel
+left it, and restored there from `kings/` on a host that has no such cache. Records of kind
+`vacate` and `retire`, written by an earlier build that struck off a champion whose repository
+was gone, still read: such a model holds no place.
 
 **Champions.** The lane's champions are read back from the store: every record that crowned a
 model, newest first, each mapped to the hotkey that committed it, less the ones gone. The ones paid
@@ -62,7 +61,6 @@ from __future__ import annotations
 
 import copy
 import logging
-import math
 import os
 import threading
 import time
@@ -71,6 +69,7 @@ from pathlib import Path
 from typing import Any
 
 from .. import hub
+from .. import kings as kings_
 from ..chain import Commitment
 from ..config import VectorConfig
 from ..protocol import commitment as commitment_
@@ -84,20 +83,25 @@ log = logging.getLogger(__name__)
 LANE = "vector"
 #: An entry that reached the queue: its hotkey has made its one submission.
 SUBMITTED = (QUEUED, "duelled", "crowned", "void", "missing", "vacated", "retired")
-#: An entry whose repository the Hub did not show at its turn, and which has left the queue.
+#: An entry whose repository the validator could not download at its turn, out of the queue.
 MISSING = "missing"
-#: A king dethroned because its repository was gone.
-VACATED = "vacated"
-#: A champion, not the king, struck off because its repository was gone.
-RETIRED = "retired"
-#: The kinds of record that strike a model off, naming it in their king slot.
+#: The kinds of record an earlier build wrote to strike a model off, naming it in their king slot,
+#: and the statuses its entries took: read, never written now.
 STRUCK = ("vacate", "retire")
-#: The least time between two looks at the champions on the Hub (`watch`), in seconds.
-WATCH_S = 60.0
-#: How many looks in a row must find a champion's repository missing before it is gone.
-MISSES = 3
+VACATED = "vacated"
+RETIRED = "retired"
+#: How many times a Hub that does not answer is asked about a challenger before the entry is
+#: `missing`, and the least time between two of those tries (a step that comes sooner waits).
+HUB_TRIES = 3
+HUB_GAP_S = 90.0
 #: `champions.json`'s layout.
 CHAMPIONS_SCHEMA = 1
+
+
+def _now() -> float:
+    return time.time()
+
+
 #: The lane's state, as the store keeps it for another host (`Store.validator_path`).
 STATE_FILE = f"validator/{LANE}.json"
 
@@ -127,9 +131,7 @@ class VectorLane:
         self._engine: Any = None
         #: Held by whatever reads or writes the lane's state: `refresh` runs beside a duel.
         self._lock = threading.RLock()
-        #: Held by the one `watch` running; the other thread's passes rather than waits.
-        self._watching = threading.Lock()
-        self._watched_at = -math.inf
+        self.kings = kings_.Kings(cfg.kings, cfg.kings_repo, token=hub_token)
 
     # -- the lane engine, built once --------------------------------------------------------
 
@@ -155,7 +157,7 @@ class VectorLane:
         if self.cfg.mirror:
             from vector_orchestrator.store.mirror import Mirror
 
-            mirror = Mirror(store.root, self.cfg.mirror, token=os.environ.get("HF_TOKEN"))
+            mirror = Mirror(store.root, self.cfg.mirror, token=self.hub_token)
             self._take_up(store, mirror, starting=True)
         if store.manifest() is None:
             with store_lock(store.root):
@@ -340,13 +342,10 @@ class VectorLane:
         return sorted(waiting, key=lambda e: (e.commit_block, e.hotkey))
 
     def refresh(self, chain: Any) -> list[Entry]:
-        """Intake, the champions watched and the queue republished: what the worker runs beside a
-        duel, so a commitment made while one runs is in the queue the dashboard shows within the
-        minute rather than after the duel, and a champion whose repository is gone stops being
-        paid. The entries that changed."""
+        """Intake and the queue republished: what the worker runs beside a duel, so a commitment
+        made while one runs is in the queue the dashboard shows within the minute rather than
+        after the duel. The entries that changed."""
         changed = self.intake(chain.commitments(), chain.block())
-        if self.watch():
-            self.publish_champions()
         self.publish_queue(self.queue())
         return changed
 
@@ -393,6 +392,8 @@ class VectorLane:
                 )
                 record["request"] = req.as_dict(self.spec)
                 self.state.save()
+        if king is not None:
+            self._restore_king(king)
         try:
             with store_lock(self.engine.store.root):
                 result = self.engine.run(req)
@@ -417,13 +418,30 @@ class VectorLane:
 
     def _admit(self, entry: Entry, record: dict[str, Any]) -> dict[str, Any] | None:
         """Look the challenger up on the Hub at its turn: None when it may duel, else why it is
-        passed over (`{"status": "skipped", ...}`), with its record updated. A Hub that does not
-        answer is a repository that is not there. Called holding the lane's lock."""
+        passed over (`{"status": "skipped", ...}`) with its record updated, or why it waits
+        (`{"status": "waiting", ...}`): a Hub that does not answer is asked again, `HUB_TRIES`
+        times in all and never sooner than `HUB_GAP_S` after the last try. Called holding the
+        lane's lock."""
         by_weights = self.state.lane(LANE)["by_weights"]
+        tried_at = float(record.get("hub_tried_at") or 0.0)
+        if tried_at and (left := tried_at + HUB_GAP_S - _now()) > 0:
+            return {"status": "waiting", "reason": f"{record['reason']}; again in {left:.0f}s"}
         try:
             found = hub.inspect(entry.repo, entry.revision, self.shape, token=self.hub_token)
-        except hub.NotVisible as exc:  # HubUnreachable too
-            record.update(status=MISSING, reason=f"not on the Hub: {exc}")
+            hub.accessible(entry.repo, token=self.hub_token)
+        except hub.HubUnreachable as exc:
+            tries = int(record.get("hub_tries", 0)) + 1
+            record["hub_tries"] = tries
+            record["hub_tried_at"] = _now()
+            if tries < HUB_TRIES:
+                record["reason"] = f"the Hub did not answer ({tries} of {HUB_TRIES}): {exc}"
+                self.state.save()
+                return {"status": "waiting", "reason": record["reason"]}
+            record.update(status=MISSING, reason=f"the Hub did not answer {tries} times: {exc}")
+            self.state.save()
+            return {"status": "skipped", "reason": record["reason"]}
+        except hub.NotVisible as exc:
+            record.update(status=MISSING, reason=f"not downloadable: {exc}")
             self.state.save()
             return {"status": "skipped", "reason": record["reason"]}
         except hub.NotASubmission as exc:
@@ -452,125 +470,60 @@ class VectorLane:
         self.state.save()
         return None
 
-    # -- champions whose repository is gone -------------------------------------------------
+    # -- the kings kept ---------------------------------------------------------------------
 
-    def watch(self, *, every: float | None = None) -> bool:
-        """Look the king and the champions paid now up on the Hub, at most once per `every`
-        seconds (`WATCH_S`), newest first and on past the ones gone until the pool is full of models still
-        there; whether one was found gone this time. One the Hub does not show `MISSES` looks in
-        a row is gone, in the lane's state, and leaves the pool at once (`strike` records it in
-        the store). A Hub that does not answer counts neither way. Never raises."""
-        if not self._watching.acquire(blocking=False):
-            return False  # the other thread is looking now
+    def kept_models(self) -> list[dict[str, Any]]:
+        """The newest `kings.KEPT` crowned models, newest first, each with the `sha256` its
+        admission recorded for its weights (none for a crowning this state never saw): what
+        `kings/` keeps."""
+        newest = [m for m, _, _, gone in self._crowned() if m and not gone][: kings_.KEPT]
+        with self._lock:
+            entries = self.state.lane(LANE)["entries"]
+            for model in newest:
+                model["sha256"] = (entries.get(model["key"]) or {}).get("weights_sha256")
+        return newest
+
+    def keep_kings(self) -> None:
+        """`kings/` brought to the newest crowned models, and the Hub copy brought level. The
+        weights of a king not kept yet come from the orchestrator's cache (its own duel left them
+        there), else from the Hub copy, else from the miner's repository while it still answers;
+        one found nowhere now is tried again next step. Never raises."""
         try:
-            now = time.monotonic()
-            if now - self._watched_at < (WATCH_S if every is None else every):
-                return False
-            self._watched_at = now
-            return self._watch()
-        except Exception:  # noqa: BLE001 - a look that failed is the next one's to make
-            log.exception("watching the champions failed")
-            return False
-        finally:
-            self._watching.release()
+            missing = self.kings.keep(self.kept_models(), self._king_weights)
+            if missing:
+                log.warning("kings: weights not found yet for %s", missing)
+            self.kings.publish()
+        except Exception:  # noqa: BLE001 - the next step tries again
+            log.exception("keeping the kings failed")
 
-    def _watch(self) -> bool:
-        live = 0
-        found = False
-        for model, hotkey, _, gone in self._crowned():
-            if gone or not model:
-                continue
-            try:
-                hub.inspect(model["repo"], model["revision"], self.shape, token=self.hub_token)
-            except hub.HubUnreachable as exc:
-                # Nothing can be learnt from a Hub that does not answer: the next look goes on.
-                log.info("watch: the Hub did not answer for %s: %s", model["repo"], exc)
-                break
-            except hub.NotVisible as exc:
-                if self._missed(model["key"], f"its repository is gone: {exc}"):
-                    found = True
-                    continue
-            except hub.NotASubmission:
-                pass  # what a pinned revision holds cannot change; it was admitted once
-            else:
-                self._seen(model["key"])
-            # Still there, or not yet counted gone: it holds its place.
-            if hotkey:
-                live += 1
-                if live >= len(CHAMPION_SPLIT):
-                    break
-        return found
+    def _king_weights(self, model: dict[str, Any]) -> Path | None:
+        from vector_orchestrator.submissions.resolve import Resolved
 
-    def _missed(self, key: str, reason: str) -> bool:
-        """One more look that found `key`'s repository missing; whether that makes it gone."""
-        with self._lock:
-            watched = self.state.lane(LANE).setdefault("watch", {})
-            mark = watched.setdefault(key, {"misses": 0})
-            mark["misses"] = int(mark.get("misses", 0)) + 1
-            mark["reason"] = reason
-            gone = mark["misses"] >= MISSES
-            if gone:
-                mark["gone"] = True
-            self.state.save()
-        if gone:
-            log.warning("watch: %s is gone after %d misses: %s", key, MISSES, reason)
-        else:
-            log.info("watch: %s missed %d of %d: %s", key, mark["misses"], MISSES, reason)
-        return gone
+        cache = self.engine.runtime.cache
+        resolved = Resolved(repo=model["repo"], revision=model["revision"], sha=model["revision"])
+        if cache.lookup(resolved) is not None:
+            path = cache.checkout(model["revision"]) / hub.WEIGHTS_FILE
+            if path.is_file():
+                return path
+        found = self.kings.fetch_from_hub(model["key"])
+        if found is not None:
+            return found
+        return self.kings.fetch_from_miner(model["repo"], model["revision"])
 
-    def _seen(self, key: str) -> None:
-        """A look that found `key`'s repository there: its misses so far are forgotten."""
-        with self._lock:
-            watched = self.state.lane(LANE).get("watch") or {}
-            if key in watched and not watched[key].get("gone"):
-                del watched[key]
-                self.state.save()
+    def _restore_king(self, king: Any) -> None:
+        """The king's weights into the orchestrator's cache from `kings/`, on a host that has no
+        checkout of it: the duel then fetches it without asking the Hub."""
+        import shutil
 
-    def _gone(self) -> dict[str, str]:
-        """The models the watch found gone, with why: `{key: reason}`."""
-        with self._lock:
-            watched = self.state.lane(LANE).get("watch") or {}
-            return {k: str(m.get("reason", "")) for k, m in watched.items() if m.get("gone")}
+        from vector_orchestrator.submissions.resolve import Resolved
 
-    def strike(self) -> list[str]:
-        """Record in the store what the watch found gone and the store does not say yet: the king
-        vacated, the crown returned to the newest earlier king still there, and any other
-        champion retired. Run between duels, since it takes the store's lock. The keys struck."""
-        from vector_orchestrator.ids import SubmissionRef
-        from vector_orchestrator.store.writer import store_lock
-
-        gone = self._gone()
-        if not gone:
-            return []
-        struck = self._struck()
-        crowned = [(model, out) for model, _, _, out in self._crowned() if model]
-        pending = [m for m, _ in crowned if m["key"] in gone and m["key"] not in struck]
-        if not pending:
-            return []
-        # Newest first: the first of these is the newest earlier king still there.
-        live = [SubmissionRef.from_dict(m) for m, out in crowned if not out]
-        done = []
-        with store_lock(self.engine.store.root):
-            for model in pending:
-                ref = SubmissionRef.from_dict(model)
-                reason = gone[ref.key]
-                king = SubmissionRef.from_dict((self.engine.store.head() or {}).get("king"))
-                if king is not None and king.key == ref.key:
-                    successor = live[0] if live else None
-                    self.engine.vacate(
-                        king, block=self._claim_block(), reason=reason, successor=successor
-                    )
-                    status = VACATED
-                else:
-                    self.engine.retire(ref, block=self._claim_block(), reason=reason)
-                    status = RETIRED
-                with self._lock:
-                    record = self.state.lane(LANE)["entries"].get(ref.key)
-                    if record is not None:
-                        record.update(status=status, reason=reason)
-                        self.state.save()
-                done.append(ref.key)
-        return done
+        cache = self.engine.runtime.cache
+        resolved = Resolved(repo=king.repo, revision=king.revision, sha=king.revision)
+        kept = self.kings.path(king.key)
+        if cache.lookup(resolved) is not None or not kept.is_file():
+            return
+        cache.store(resolved, lambda into: shutil.copyfile(kept, into / hub.WEIGHTS_FILE))
+        log.info("kings: %s restored into the cache from kings/", king.key)
 
     def _struck(self, index: list[dict[str, Any]] | None = None) -> set[str]:
         """The models the store's index (or `index`, read from it) has vacated or retired."""
@@ -594,10 +547,10 @@ class VectorLane:
     # -- the validator's view ----------------------------------------------------------------
 
     def step(self, chain: Any) -> Progress:
-        """One duel: the champions watched first and the ones gone struck (a king gone hands the
-        crown back), then the oldest entry the Hub shows against the king, or on an empty throne a
-        genesis (`duel` with no king). An entry whose repository is not there is passed over for
-        the next. Never raises the orchestrator's."""
+        """One duel: the kings kept first, then the oldest entry the validator can download
+        against the king, or on an empty throne a genesis (`duel` with no king). An entry whose
+        repository cannot be downloaded is passed over for the next. Never raises the
+        orchestrator's."""
         from vector_orchestrator.duel.orchestrate import CrownMoved, DuelFailed
         from vector_orchestrator.store.mirror import StoreDiverged
 
@@ -605,8 +558,7 @@ class VectorLane:
             self.sync()
         except StoreDiverged as exc:
             return Progress(LANE, FAILED, f"the store and its mirror disagree: {exc}")
-        self.watch()
-        self.strike()
+        self.keep_kings()
         self.publish_queue(self.queue())
         self.publish_champions()
         queue = self.queue()
@@ -627,6 +579,8 @@ class VectorLane:
             except DuelFailed as exc:
                 log.error("duel of %s failed (it stays queued): %s", entry.entry, exc)
                 return Progress(LANE, FAILED, str(exc))
+            if result.get("status") == "waiting":
+                return Progress(LANE, WAITING, f"{entry.entry}: {result.get('reason')}")
             if result.get("status") == "skipped":
                 log.info("passed over %s: %s", entry.entry, result.get("reason"))
                 passed.append(f"{entry.entry}: {result.get('reason')}")
@@ -637,6 +591,7 @@ class VectorLane:
                 f"{result['reason']}; dethroned={record.get('dethroned')} "
                 f"king={record.get('king_score')} challenger={record.get('challenger_score')}"
             )
+            self.keep_kings()
             self.publish_queue(self.queue())
             self.publish_champions()
             return Progress(LANE, WORKED, detail, record)
@@ -710,6 +665,7 @@ class VectorLane:
             "king": head.get("king"),
             "champions": self.champions(),
             "queue": [e.__dict__ for e in self.queue()],
+            "kings": self.kings.kept(),
             "entries": self.state.lane(LANE)["entries"],
         }
 
@@ -718,7 +674,7 @@ class VectorLane:
     def champions(self) -> list[str | None]:
         """Every model this lane crowned and that is not gone, newest first, as the hotkey that
         committed it; None for one no entry of this validator's committed. Read from the store's
-        index and the watch."""
+        index."""
         return [hotkey for _, hotkey, _, gone in self._crowned() if not gone]
 
     def paid(self) -> list[dict[str, Any]]:
@@ -746,8 +702,8 @@ class VectorLane:
 
     def _crowned(self) -> list[tuple[dict[str, Any], str | None, dict[str, Any], bool]]:
         """Every crowning in the index, newest first: the model, its hotkey (None for one no entry
-        of this validator's committed), the record that crowned it, and whether it is gone - struck
-        in the index (vacated or retired) or found gone by the watch and not struck yet."""
+        of this validator's committed), the record that crowned it, and whether an earlier build
+        struck it off in the index (vacated or retired)."""
         from vector_orchestrator.ids import submission_key
 
         # The index first: building the engine takes the store and the lane's state up from the
@@ -755,7 +711,7 @@ class VectorLane:
         index = list(self.engine.store.iter_index())
         with self._lock:
             entries = dict(self.state.lane(LANE)["entries"])
-        gone = set(self._gone()) | self._struck(index)
+        gone = self._struck(index)
         crowned = []
         for record in index:
             if record.get("kind") in STRUCK:

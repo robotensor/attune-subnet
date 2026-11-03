@@ -32,6 +32,16 @@ class FakeHub:
 
     def __init__(self, repos):
         self.repos = repos
+        #: Repositories gated without this account let in: metadata shows, the download does not.
+        self.not_let_in = set()
+
+    def auth_check(self, repo, repo_type=None, token=None):
+        from huggingface_hub.errors import GatedRepoError
+
+        if repo in self.not_let_in:
+            raise GatedRepoError(
+                "403", response=SimpleNamespace(headers={}, status_code=403, request=None)
+            )
 
     def model_info(self, repo, revision, files_metadata):
         from huggingface_hub.errors import RepositoryNotFoundError
@@ -69,8 +79,12 @@ def lane(tmp_path):
         policy_python="python",
         simulator_python="python",
         simulator_root="/checkout/RoboTwin-Vector",
+        kings=tmp_path / "kings",
     )
-    return VectorLane(cfg, State(tmp_path / "state"))
+    lane = VectorLane(cfg, State(tmp_path / "state"))
+    # No Hub here: whatever the kings would ask of it fails at once, as if it did not answer.
+    lane.kings._api = SimpleNamespace()
+    return lane
 
 
 @pytest.fixture
@@ -78,11 +92,12 @@ def hub_of(monkeypatch):
     """Point the lane's Hub lookups at a `FakeHub` of `repos`; the fake, to change later."""
     from robotensor import hub
 
-    real = hub.inspect
+    real, really = hub.inspect, hub.accessible
 
     def install(repos):
         fake = FakeHub(repos)
         monkeypatch.setattr(hub, "inspect", lambda *a, **kw: real(*a, **{**kw, "api": fake}))
+        monkeypatch.setattr(hub, "accessible", lambda *a, **kw: really(*a, **{**kw, "api": fake}))
         return fake
 
     return install
@@ -436,22 +451,77 @@ def test_a_challenger_the_hub_does_not_show_is_skipped_for_the_next(lane, hub_of
     assert [r.challenger.repo for r in asked] == ["m/two"]
     assert statuses(lane) == {"hk1": "missing", "hk2": "crowned"}
     (gone,) = [r for r in lane.state.lane("vector")["entries"].values() if r["hotkey"] == "hk1"]
-    assert "not on the Hub" in gone["reason"]
+    assert "not downloadable" in gone["reason"]
     assert not lane.queue()
 
 
-def test_a_hub_that_does_not_answer_is_a_missing_challenger(lane, monkeypatch):
+def test_a_hub_that_does_not_answer_is_asked_again_three_times_in_all(lane, monkeypatch):
     from robotensor import hub
-    from robotensor.lanes.base import IDLE
+    from robotensor.lanes import vector
+    from robotensor.lanes.base import IDLE, WAITING
 
     def down(*a, **kw):
         raise hub.HubUnreachable("503")
 
     monkeypatch.setattr(hub, "inspect", down)
+    clock = [1000.0]
+    monkeypatch.setattr(vector, "_now", lambda: clock[0])
     lane.intake([c("hk1", "m/one", A, 10)], 30)
+    for n in range(1, vector.HUB_TRIES):
+        progress = lane.step(chain=FakeChain())
+        assert progress.outcome == WAITING and f"({n} of {vector.HUB_TRIES})" in progress.detail
+        assert statuses(lane) == {"hk1": "queued"} and lane.queue()
+        clock[0] += vector.HUB_GAP_S
     progress = lane.step(chain=FakeChain())
     assert progress.outcome == IDLE and "503" in progress.detail
     assert statuses(lane) == {"hk1": "missing"} and not lane.queue()
+
+
+def test_a_step_sooner_than_the_gap_after_a_silent_hub_waits_without_asking(lane, monkeypatch):
+    """Three tries in three consecutive steps would span 90 seconds; a short outage must not use
+    a challenger's submission up. A step within `HUB_GAP_S` of the last try does not count."""
+    from robotensor import hub
+    from robotensor.lanes import vector
+    from robotensor.lanes.base import WAITING
+
+    asked = []
+
+    def down(*a, **kw):
+        asked.append(1)
+        raise hub.HubUnreachable("503")
+
+    monkeypatch.setattr(hub, "inspect", down)
+    clock = [1000.0]
+    monkeypatch.setattr(vector, "_now", lambda: clock[0])
+    lane.intake([c("hk1", "m/one", A, 10)], 30)
+    assert lane.step(chain=FakeChain()).outcome == WAITING
+    for _ in range(5):
+        clock[0] += 10
+        progress = lane.step(chain=FakeChain())
+        assert progress.outcome == WAITING and "again in" in progress.detail
+    assert len(asked) == 1 and statuses(lane) == {"hk1": "queued"}
+    assert vector.HUB_GAP_S == 90
+    clock[0] += vector.HUB_GAP_S
+    lane.step(chain=FakeChain())
+    assert len(asked) == 2
+
+
+def test_a_gated_repository_the_validator_is_not_let_into_is_missing(lane, hub_of, monkeypatch):
+    """Its metadata shows to anyone, so the digest check passes; the download would not."""
+    fake = hub_of(
+        {f"m/shut@{A}": {"model.safetensors": "w1"}, f"m/two@{B}": {"model.safetensors": "w2"}}
+    )
+    fake.not_let_in.add("m/shut")
+    lane.intake([c("hk1", "m/shut", A, 10), c("hk2", "m/two", B, 20)], 30)
+    asked = []
+    monkeypatch.setattr(lane.engine, "run", genesis_run(asked))
+
+    lane.step(chain=FakeChain())
+
+    assert [r.challenger.repo for r in asked] == ["m/two"]
+    assert statuses(lane) == {"hk1": "missing", "hk2": "crowned"}
+    (shut,) = [r for r in lane.state.lane("vector")["entries"].values() if r["hotkey"] == "hk1"]
+    assert "may not download" in shut["reason"]
 
 
 def test_weights_that_are_not_the_committed_digest_are_refused_at_their_turn(lane, hub_of):
@@ -510,135 +580,203 @@ def history(lane, *names):
     return refs
 
 
-def on_the_hub(hub_of, refs):
-    """A Hub that shows `refs`, and nothing else."""
-    return hub_of({r.entry: {"model.safetensors": r.repo.split("/")[1]} for r in refs})
+def test_the_four_newest_crowned_models_are_kept_and_the_oldest_pushed_out(lane):
+    """The kings' weights come from the orchestrator's cache, where each one's duel left them;
+    `kings/` holds the four newest and the fifth is dropped."""
+    from vector_orchestrator.submissions.resolve import Resolved
 
+    from robotensor import kings as kings_
 
-def watched(lane, times):
-    """`times` looks at the champions, one after another; whether the last found one gone."""
-    return [lane.watch(every=0) for _ in range(times)][-1]
+    refs = history(lane, "a", "b", "c", "d", "e")
+    cache = lane.engine.runtime.cache
+    for ref in refs:
+        resolved = Resolved(repo=ref.repo, revision=ref.revision, sha=ref.revision)
+        cache.store(resolved, lambda into, r=ref: (into / "model.safetensors").write_text(r.repo))
 
+    lane.keep_kings()
 
-def test_gone_champions_leave_the_pool_and_the_crown_returns_to_the_previous_king(lane, hub_of):
-    """The king history, newest first, is A B C D E F; A's and D's repositories are deleted. B,
-    C, E and F are paid, and B is king again."""
-    from robotensor.lanes import vector
-    from robotensor.protocol import weights as weights_
-
-    f, e, d, c_, b, a = history(lane, "f", "e", "d", "c", "b", "a")
-    on_the_hub(hub_of, [b, c_, e, f])
-    hk = {r.repo.split("/")[1]: f"hk-{r.repo.split('/')[1]}" for r in (a, b, c_, d, e, f)}
-    assert lane.champions() == [hk[x] for x in "abcdef"]
-
-    # Missing once or twice is not gone yet: the pool stays as it was.
-    assert watched(lane, vector.MISSES - 1) is False
-    assert lane.champions() == [hk[x] for x in "abcdef"]
-    # Missing MISSES times in a row is gone: out of the pool at once, before the store says so.
-    assert watched(lane, 1) is True
-    assert lane.champions() == [hk[x] for x in "bcef"]
-    assert [p["hotkey"] for p in lane.paid()] == [hk[x] for x in "bcef"]
-    assert [p["share"] for p in lane.paid()] == [0.4, 0.3, 0.2, 0.1]
-    assert "burned" not in lane.paid()[0]
-    assert lane.engine.store.head()["king"] == a.as_dict()
-
-    # Recorded in the store between duels: A vacated with B its successor, D retired.
-    assert sorted(lane.strike()) == sorted([a.key, d.key])
-    kinds = [(r["kind"], r["king"]["repo"]) for r in lane.engine.store.iter_index()][-2:]
-    assert kinds == [("vacate", "m/a"), ("retire", "m/d")]
-    assert lane.engine.store.head()["king"] == b.as_dict()
-    assert lane.champions() == [hk[x] for x in "bcef"]
-    status = statuses(lane)
-    assert (status["hk-a"], status["hk-d"], status["hk-b"]) == ("vacated", "retired", "crowned")
-    assert lane.strike() == []  # nothing more to record
-
-    uids = {hk[x]: n for n, x in enumerate("abcdef", start=1)}
-    vector_ = weights_.weight_vector([weights_.Lane("vector", 0.3, lane.champions())], uids, 0)
-    assert vector_ == pytest.approx({0: 0.7, 2: 0.12, 3: 0.09, 5: 0.06, 6: 0.03})
-
-
-def test_the_watch_looks_no_further_than_a_full_pool(lane, hub_of, monkeypatch):
-    from robotensor import hub
-
-    refs = history(lane, "f", "e", "d", "c", "b", "a")
-    on_the_hub(hub_of, refs)
-    looked = []
-    inspect = hub.inspect
-    monkeypatch.setattr(
-        hub, "inspect", lambda repo, *a, **kw: looked.append(repo) or inspect(repo, *a, **kw)
+    assert lane.kings.kept() == [r.key for r in reversed(refs)][:4]
+    assert sorted(p.name for p in lane.kings.root.iterdir() if p.is_dir()) == sorted(
+        r.key for r in refs[1:]
     )
-    assert lane.watch(every=0) is False
-    assert looked == ["m/a", "m/b", "m/c", "m/d"]
-    # A second look within the minute is not made.
-    assert lane.watch() is False and len(looked) == 4
+    assert lane.kings.path(refs[-1].key).read_text() == "m/e"
+    assert lane.kings.manifest()["kings"][0] == {
+        "place": 1, "key": refs[-1].key, "repo": "m/e", "revision": refs[-1].revision,
+        "sha256": None, "weights": True,
+    }  # fmt: skip
+    assert kings_.KEPT == 4
 
 
-def test_a_repository_seen_again_before_it_is_gone_starts_its_count_over(lane, hub_of):
+def test_weights_that_do_not_hash_to_what_the_duel_recorded_are_not_kept(tmp_path):
+    """A wrong copy - on the Hub, in a cache - is refused, and removed when it had been fetched
+    into `kings/`; the king is wanted again next time."""
+    import hashlib
+
+    from robotensor.kings import Kings
+
+    kings = Kings(tmp_path / "kings", "", api=object())
+    good = tmp_path / "good"
+    good.write_bytes(b"weights")
+    sha = hashlib.sha256(b"weights").hexdigest()
+    model = {"key": "a", "repo": "m/a", "revision": "1" * 40, "sha256": sha}
+
+    def from_hub(m):  # as `fetch_from_hub` does: straight into its place
+        fetched = kings.path(m["key"])
+        fetched.parent.mkdir(parents=True, exist_ok=True)
+        fetched.write_bytes(b"tampered")
+        return fetched
+
+    assert kings.keep([model], from_hub) == ["a"]
+    assert not kings.path("a").exists() and kings.manifest()["kings"][0]["weights"] is False
+
+    assert kings.keep([model], lambda m: good) == []
+    assert kings.path("a").read_bytes() == b"weights"
+    assert kings.manifest()["kings"][0]["sha256"] == sha
+
+
+def test_a_kept_king_carries_the_sha256_its_admission_recorded(lane):
+    (one,) = history(lane, "one")
+    lane.state.lane("vector")["entries"][one.key] = {"hotkey": "hk1", "weights_sha256": "f" * 64}
+
+    (model,) = lane.kept_models()
+    assert model["key"] == one.key and model["sha256"] == "f" * 64
+
+
+def test_a_host_restored_from_the_hub_copy_takes_the_kings_without_uploading_them_again(tmp_path):
+    """`kings/` empty, the Hub copy ahead of it: the weights come down, and bringing the Hub
+    level is the manifest alone."""
+    from robotensor.kings import Kings
+
+    calls = []
+
+    class Api:
+        def hf_hub_download(self, repo, filename, repo_type=None, local_dir=None):
+            calls.append(("download", filename))
+            target = Path(local_dir) / filename
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"weights")
+            return str(target)
+
+        def create_repo(self, repo, **kw):
+            pass
+
+        def list_repo_files(self, repo, repo_type=None):
+            return ["kings.json", "a/model.safetensors"]
+
+        def create_commit(self, repo, operations, commit_message, repo_type=None):
+            calls.append(("commit", [o.path_in_repo for o in operations]))
+
+    kings = Kings(tmp_path / "kings", "v/kings", api=Api())
+    model = {"key": "a", "repo": "m/a", "revision": "1" * 40}
+    assert kings.keep([model], lambda m: kings.fetch_from_hub(m["key"])) == []
+    assert kings.path("a").read_bytes() == b"weights"
+    assert kings.publish() is True
+    assert calls == [("download", "a/model.safetensors"), ("commit", ["kings.json"])]
+
+
+def test_a_king_without_weights_anywhere_is_tried_again_next_step(lane, monkeypatch):
     from robotensor.lanes import vector
 
     (one,) = history(lane, "one")
-    on_the_hub(hub_of, [])
-    watched(lane, vector.MISSES - 1)
-    on_the_hub(hub_of, [one])
-    watched(lane, 1)
-    on_the_hub(hub_of, [])
-    assert watched(lane, vector.MISSES - 1) is False
-    assert lane.champions() == ["hk-one"]
+    monkeypatch.setattr(vector.VectorLane, "_king_weights", lambda self, model: None)
+    lane.keep_kings()
+    assert lane.kings.kept() == [one.key] and not lane.kings.path(one.key).exists()
+    assert lane.kings.manifest()["kings"][0]["weights"] is False
+
+    found = lane.engine.runtime.cache.root / "w"
+    found.parent.mkdir(parents=True, exist_ok=True)
+    found.write_text("weights")
+    monkeypatch.setattr(vector.VectorLane, "_king_weights", lambda self, model: found)
+    lane.keep_kings()
+    assert lane.kings.path(one.key).read_text() == "weights"
 
 
-def test_a_hub_that_does_not_answer_counts_neither_way(lane, hub_of, monkeypatch):
-    from robotensor import hub
-    from robotensor.lanes import vector
+def test_a_folder_that_is_not_a_kings_is_never_removed(tmp_path):
+    """Whatever the directory is pointed at, only a king's folder is this code's to drop."""
+    from robotensor.kings import Kings
 
-    (one,) = history(lane, "one")
-    on_the_hub(hub_of, [])
-    watched(lane, vector.MISSES - 1)
-    missing = hub.inspect
-
-    def down(*a, **kw):
-        raise hub.HubUnreachable("503")
-
-    monkeypatch.setattr(hub, "inspect", down)
-    assert watched(lane, 5) is False
-    assert lane.champions() == ["hk-one"] and lane.strike() == []
-    monkeypatch.setattr(hub, "inspect", missing)
-    assert watched(lane, 1) is True
-    assert lane.champions() == []
+    root = tmp_path / "kings"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "code.py").write_text("x")
+    (root / "old").mkdir()
+    (root / "old" / "model.safetensors").write_text("w")
+    kings = Kings(root, api=SimpleNamespace())
+    kings.keep([], lambda m: None)
+    assert (root / "src" / "code.py").is_file() and not (root / "old").exists()
+    with pytest.raises(ValueError):
+        Kings("relative/kings")
 
 
-def test_a_king_gone_with_no_earlier_king_left_leaves_the_throne_to_the_next_entry(
-    lane, hub_of, monkeypatch
-):
-    from robotensor.lanes import vector
-    from robotensor.lanes.base import WORKED
+def test_a_king_is_restored_into_the_cache_from_kings_before_its_duel(lane, hub_of, monkeypatch):
+    """A host with no checkout of the king fetches it from `kings/`, never from the miner."""
+    from vector_orchestrator.submissions.resolve import Resolved
 
-    (one,) = history(lane, "one")
-    lane.intake([c("hk2", "m/two", B, 120)], 130)
+    (king,) = history(lane, "king")
+    lane.kings.path(king.key).parent.mkdir(parents=True)
+    lane.kings.path(king.key).write_text("kept weights")
     hub_of({f"m/two@{B}": {"model.safetensors": "w2"}})
-    watched(lane, vector.MISSES - 1)
-    monkeypatch.setattr(vector, "WATCH_S", 0)
+    lane.intake([c("hk2", "m/two", B, 20)], 30)
     asked = []
     monkeypatch.setattr(lane.engine, "run", genesis_run(asked))
 
-    # The step's own look is the last miss: the king is vacated, and the throne left empty.
-    progress = lane.step(chain=FakeChain())
+    lane.step(chain=FakeChain())
 
-    assert [r["kind"] for r in lane.engine.store.iter_index()] == ["genesis", "vacate"]
-    assert lane.engine.store.head()["king"] is None
-    assert progress.outcome == WORKED
-    (req,) = asked
-    assert req.king is None and req.challenger.repo == "m/two"
-    assert statuses(lane) == {"hk-one": "vacated", "hk2": "crowned"}
+    cache = lane.engine.runtime.cache
+    kept = cache.lookup(Resolved(repo=king.repo, revision=king.revision, sha=king.revision))
+    assert kept is not None and (kept.root / "model.safetensors").read_text() == "kept weights"
+    assert [r.king.key for r in asked] == [king.key]
 
 
-def test_a_king_still_on_the_hub_keeps_the_crown(lane, hub_of):
-    from robotensor.lanes import vector
+def test_the_kings_hub_copy_is_brought_level_in_one_commit(tmp_path):
+    """Weights not there uploaded, folders no longer kept deleted, the manifest with them; and
+    nothing asked of the Hub while it already matches."""
+    from robotensor.kings import Kings
 
-    (one,) = history(lane, "one")
-    on_the_hub(hub_of, [one])
-    assert watched(lane, vector.MISSES) is False
-    assert lane.strike() == []
-    assert lane.engine.store.head()["king"] == one.as_dict()
+    calls = []
+
+    class Api:
+        def create_repo(self, repo, **kw):
+            calls.append(("create", repo))
+
+        def list_repo_files(self, repo, repo_type=None):
+            return ["kings.json", "old/model.safetensors", "b/model.safetensors"]
+
+        def create_commit(self, repo, operations, commit_message, repo_type=None):
+            calls.append(("commit", [(type(o).__name__, o.path_in_repo) for o in operations]))
+
+    kings = Kings(tmp_path / "kings", "v/kings", api=Api())
+    (tmp_path / "w").write_text("weights")
+    newest = [{"key": k, "repo": f"m/{k}", "revision": "1" * 40} for k in ("a", "b")]
+    assert kings.keep(newest, lambda m: tmp_path / "w") == []
+
+    assert kings.publish() is True
+    assert calls == [
+        ("create", "v/kings"),
+        (
+            "commit",
+            [
+                ("CommitOperationAdd", "kings.json"),
+                ("CommitOperationAdd", "a/model.safetensors"),
+                ("CommitOperationDelete", "old/model.safetensors"),
+            ],
+        ),
+    ]
+    calls.clear()
+    assert kings.publish() is True and calls == []
+
+
+def test_a_hub_copy_that_cannot_be_written_is_tried_again_next_time(tmp_path):
+    from robotensor.kings import Kings
+
+    class Api:
+        def create_repo(self, repo, **kw):
+            raise OSError("no network")
+
+    kings = Kings(tmp_path / "kings", "v/kings", api=Api())
+    (tmp_path / "w").write_text("weights")
+    kings.keep([{"key": "a", "repo": "m/a", "revision": "1" * 40}], lambda m: tmp_path / "w")
+    assert kings.publish() is False
+    assert not (tmp_path / "kings" / "published.json").exists()
 
 
 # -- another host takes the lane up from the mirror -----------------------------------------------
@@ -691,8 +829,11 @@ def host(path):
         simulator_python="python",
         simulator_root="/checkout/RoboTwin-Vector",
         mirror="org/results",
+        kings=path / "kings",
     )
-    return VectorLane(cfg, State(path / "state"))
+    lane = VectorLane(cfg, State(path / "state"))
+    lane.kings._api = SimpleNamespace()
+    return lane
 
 
 def crowning_run(lane, asked):
@@ -846,133 +987,3 @@ def test_a_lane_level_with_its_mirror_writes_no_state(tmp_path, remote, hub_of, 
     monkeypatch.setattr(State, "writing", no)
     first.sync()
     host(tmp_path / "first").engine  # noqa: B018 - a restart on the same host
-
-
-# -- the kings kept -------------------------------------------------------------
-
-
-def test_a_folder_that_is_not_a_kings_is_never_removed(tmp_path):
-    """Whatever the directory is pointed at, only a king's folder is this code's to drop."""
-    from robotensor.kings import Kings
-
-    root = tmp_path / "kings"
-    (root / "src").mkdir(parents=True)
-    (root / "src" / "code.py").write_text("x")
-    (root / "old").mkdir()
-    (root / "old" / "model.safetensors").write_text("w")
-    kings = Kings(root, api=SimpleNamespace())
-    kings.keep([], lambda m: None)
-    assert (root / "src" / "code.py").is_file() and not (root / "old").exists()
-    with pytest.raises(ValueError):
-        Kings("relative/kings")
-
-
-def test_weights_that_do_not_hash_to_what_the_duel_recorded_are_not_kept(tmp_path):
-    """A wrong copy - on the Hub, in a cache - is refused, and removed when it had been fetched
-    into `kings/`; the king is wanted again next time."""
-    import hashlib
-
-    from robotensor.kings import Kings
-
-    kings = Kings(tmp_path / "kings", "", api=object())
-    good = tmp_path / "good"
-    good.write_bytes(b"weights")
-    sha = hashlib.sha256(b"weights").hexdigest()
-    model = {"key": "a", "repo": "m/a", "revision": "1" * 40, "sha256": sha}
-
-    def from_hub(m):  # as `fetch_from_hub` does: straight into its place
-        fetched = kings.path(m["key"])
-        fetched.parent.mkdir(parents=True, exist_ok=True)
-        fetched.write_bytes(b"tampered")
-        return fetched
-
-    assert kings.keep([model], from_hub) == ["a"]
-    assert not kings.path("a").exists() and kings.manifest()["kings"][0]["weights"] is False
-
-    assert kings.keep([model], lambda m: good) == []
-    assert kings.path("a").read_bytes() == b"weights"
-    assert kings.manifest()["kings"][0]["sha256"] == sha
-
-
-def test_a_host_restored_from_the_hub_copy_takes_the_kings_without_uploading_them_again(tmp_path):
-    """`kings/` empty, the Hub copy ahead of it: the weights come down, and bringing the Hub
-    level is the manifest alone."""
-    from robotensor.kings import Kings
-
-    calls = []
-
-    class Api:
-        def hf_hub_download(self, repo, filename, repo_type=None, local_dir=None):
-            calls.append(("download", filename))
-            target = Path(local_dir) / filename
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(b"weights")
-            return str(target)
-
-        def create_repo(self, repo, **kw):
-            pass
-
-        def list_repo_files(self, repo, repo_type=None):
-            return ["kings.json", "a/model.safetensors"]
-
-        def create_commit(self, repo, operations, commit_message, repo_type=None):
-            calls.append(("commit", [o.path_in_repo for o in operations]))
-
-    kings = Kings(tmp_path / "kings", "v/kings", api=Api())
-    model = {"key": "a", "repo": "m/a", "revision": "1" * 40}
-    assert kings.keep([model], lambda m: kings.fetch_from_hub(m["key"])) == []
-    assert kings.path("a").read_bytes() == b"weights"
-    assert kings.publish() is True
-    assert calls == [("download", "a/model.safetensors"), ("commit", ["kings.json"])]
-
-
-def test_the_kings_hub_copy_is_brought_level_in_one_commit(tmp_path):
-    """Weights not there uploaded, folders no longer kept deleted, the manifest with them; and
-    nothing asked of the Hub while it already matches."""
-    from robotensor.kings import Kings
-
-    calls = []
-
-    class Api:
-        def create_repo(self, repo, **kw):
-            calls.append(("create", repo))
-
-        def list_repo_files(self, repo, repo_type=None):
-            return ["kings.json", "old/model.safetensors", "b/model.safetensors"]
-
-        def create_commit(self, repo, operations, commit_message, repo_type=None):
-            calls.append(("commit", [(type(o).__name__, o.path_in_repo) for o in operations]))
-
-    kings = Kings(tmp_path / "kings", "v/kings", api=Api())
-    (tmp_path / "w").write_text("weights")
-    newest = [{"key": k, "repo": f"m/{k}", "revision": "1" * 40} for k in ("a", "b")]
-    assert kings.keep(newest, lambda m: tmp_path / "w") == []
-
-    assert kings.publish() is True
-    assert calls == [
-        ("create", "v/kings"),
-        (
-            "commit",
-            [
-                ("CommitOperationAdd", "kings.json"),
-                ("CommitOperationAdd", "a/model.safetensors"),
-                ("CommitOperationDelete", "old/model.safetensors"),
-            ],
-        ),
-    ]
-    calls.clear()
-    assert kings.publish() is True and calls == []
-
-
-def test_a_hub_copy_that_cannot_be_written_is_tried_again_next_time(tmp_path):
-    from robotensor.kings import Kings
-
-    class Api:
-        def create_repo(self, repo, **kw):
-            raise OSError("no network")
-
-    kings = Kings(tmp_path / "kings", "v/kings", api=Api())
-    (tmp_path / "w").write_text("weights")
-    kings.keep([{"key": "a", "repo": "m/a", "revision": "1" * 40}], lambda m: tmp_path / "w")
-    assert kings.publish() is False
-    assert not (tmp_path / "kings" / "published.json").exists()

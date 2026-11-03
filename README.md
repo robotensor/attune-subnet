@@ -33,21 +33,20 @@ demonstration of a task and must complete the same task in a different scene.
 | **Scoring** | King of the hill. Each queued submission duels the current king on 160 units (16 tasks × 10), seeded from the finalized block when the duel starts. That block must come after the commitment. The challenger takes the crown when its average success rate beats the king's by 3+ points. |
 | **Rewards** | The lane's share goes to the 4 most recent champions: 40% / 30% / 20% / 10%, newest first. |
 
-### Missing repositories
+### Repositories and the kings' weights
 
-The Hub is checked when an entry's turn comes, not when it is queued.
+A miner's repo is gated, with the validator's Hugging Face account let in and nobody else. The
+validator checks it once, when the entry's turn comes, and downloads the weights then.
 
-- **Challenger missing.** If the Hub doesn't show the challenger's repo when its turn comes
-  (deleted, still private, or the revision is gone), it is dropped as `missing` and the validator
-  duels the next entry in the queue. The hotkey's one submission is used up.
-- **Champion missing.** About once a minute, even while a duel runs, the validator checks that
-  the king and every paid champion are still on the Hub. A repo the Hub says is missing three
-  checks in a row is gone, and it stops being paid at once: the next older champion moves up into
-  its place. At the next step it is recorded in the result store. A gone king is dethroned without a
-  duel (a `vacate` record) and the crown goes back to the newest earlier king still on the Hub. Any
-  other gone champion is struck off (a `retire` record). Neither is undone if the repo comes back.
-- **Hub unreachable.** A Hub that doesn't answer counts as a missing repo for a challenger. For a
-  champion it counts neither way: it says nothing about the repo.
+- **Challenger not downloadable.** If the validator can't download the challenger's repo at its
+  turn (deleted, private, gated without the validator let in, or the revision is gone), the entry is
+  dropped as `missing` and the validator duels the next one. The hotkey's one submission is used up.
+- **Hub not answering.** A Hub that doesn't answer is asked again, three times in all at least 90
+  seconds apart, before the entry is dropped as `missing`.
+- **Kings.** From the download on, the duel runs on the validator's copy, and nothing asks the miner
+  to keep the repo up. The four newest crowned models - the four that are paid - are kept by the
+  validator (`var/<network>/vector/kings/`) and mirrored to a public model repo (`kings_repo`), so
+  anyone can take the weights a crown was won with. A new king pushes the oldest of the four out.
 
 Submissions are weights only. Nothing a miner uploads is executed or unpickled: the safetensors
 header is checked against the pinned architecture before any tensor is read. Weights that don't

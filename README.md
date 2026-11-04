@@ -123,11 +123,15 @@ kings_repo = "<validator-account>/vector-kings"   # public model repo the four k
 ```
 
 ```bash
-export HF_TOKEN=...
+echo 'HF_TOKEN=hf_...' > config/.env   # read at start, for the validator and its workers; an exported variable wins
 attune validator --config config/<network>.toml run
 ```
 
 `status`, `weights --dry-run` and `duel --challenger owner/name@sha` are also available.
+
+The one `HF_TOKEN` is the validator's own account: miners' repos must be gated to it, and it
+writes that account's `mirror` and `kings_repo`. A validator on another account than the default
+one needs miners to add it (`attune miner submit --validator-user <account>`, repeatable).
 Interrupted duels resume from `var/<network>/`. A validator started on another host with the
 same `mirror` takes the competition up from that dataset (the index, the king and who committed
 what; not the events or clips), and will not start on an empty store while the dataset cannot be

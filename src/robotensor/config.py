@@ -21,6 +21,10 @@ Only what differs between hosts is here. Everything else is fixed in code: each 
 of the emission, the data directory (`var/<config name>/` beside `config/`, or `var/` beside a
 config elsewhere), the weights interval and Horizon's private window (per network) and the device.
 A key this build does not know is refused, with its name.
+
+Secrets are not in the TOML: a `.env` beside it (`KEY=VALUE` lines, `#` comments) is read by
+`load` into the environment for whatever is not already set there, so `HF_TOKEN=hf_...` in
+`config/.env` serves the validator and its workers alike; a variable already exported wins.
 """
 
 from __future__ import annotations
@@ -244,9 +248,38 @@ def _horizon(
 LANES = {"vector": _vector, "horizon": _horizon}
 
 
+#: The file beside a config whose `KEY=VALUE` lines go into the environment (secrets: HF_TOKEN).
+ENV_FILE = ".env"
+
+
+def read_env(path: Path) -> dict[str, str]:
+    """`KEY=VALUE` lines of `path` (blank lines and `#` comments skipped, an optional `export `,
+    one layer of matching quotes stripped); nothing when there is no such file."""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    out: dict[str, str] = {}
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip().removeprefix("export ").strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key:
+            out[key] = value
+    return out
+
+
 def load(path: str | os.PathLike[str]) -> Config:
-    """Read a config file, or `ConfigError` saying what is wrong with it."""
+    """Read a config file, or `ConfigError` saying what is wrong with it. The `.env` beside it,
+    if any, goes into the environment first (`read_env`), without writing over what is set."""
     path = Path(path).resolve()
+    for key, value in read_env(path.parent / ENV_FILE).items():
+        os.environ.setdefault(key, value)
     doc = tomllib.loads(path.read_text(encoding="utf-8"))
     _refuse_unknown("the file", doc, ("network", "netuid", "wallet", *LANES), path)
     for key in ("network", "netuid"):

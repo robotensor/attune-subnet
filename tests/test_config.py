@@ -1,5 +1,6 @@
 """The validator's config: only what differs between hosts, everything else fixed in code."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,25 @@ def write(directory: Path, text: str, name: str = "c.toml") -> Path:
     path = directory / name
     path.write_text(text)
     return path
+
+
+def test_the_env_beside_a_config_is_read_and_an_exported_variable_wins(tmp_path, monkeypatch):
+    from robotensor.config import read_env
+
+    path = write(tmp_path, GOOD)
+    (path.parent / ".env").write_text(
+        '# the token\nHF_TOKEN="hf_abc"\nexport OTHER=x=y\nSET=file\n\nnot a line\n'
+    )
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("OTHER", raising=False)
+    monkeypatch.setenv("SET", "shell")
+
+    load(path)
+
+    assert read_env(path.parent / ".env") == {"HF_TOKEN": "hf_abc", "OTHER": "x=y", "SET": "file"}
+    assert os.environ["HF_TOKEN"] == "hf_abc" and os.environ["OTHER"] == "x=y"
+    assert os.environ["SET"] == "shell"
+    assert read_env(tmp_path / "none") == {}
 
 
 def test_a_host_config_loads_and_the_rest_is_fixed(tmp_path):

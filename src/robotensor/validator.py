@@ -73,12 +73,18 @@ class WeightsThread(threading.Thread):
     def run(self) -> None:
         chain = chain_.Chain(self.cfg.network, self.cfg.netuid)
         last = 0
+        vector: VectorLane | None = None
         while not self.stop.is_set():
             try:
                 block = chain.block()
                 if last == 0 or block - last >= self.cfg.weights_interval_blocks:
-                    # A read-only view of the lane: its own state object, never saved from here.
-                    vector = lane(self.cfg, State(self.state_path))
+                    # The lane's engine once, which takes the mirror up on a new pod; the state as
+                    # the worker last wrote it, read afresh and never saved from here. Asks the
+                    # Hub nothing while weights are rate limited or refused.
+                    if vector is None:
+                        vector = lane(self.cfg, State(self.state_path))
+                    else:
+                        vector.state = State(self.state_path)
                     weights = set_weights(self.cfg, vector, chain, self.wallet)
                     last = block
                     log.info("set weights at block %s: %s", block, weights)

@@ -30,11 +30,9 @@ wallet = {{ name = "{wallet_name}", hotkey = "{wallet_hotkey}" }}
 policy_python = "{policy_python}"
 simulator_python = "{simulator_python}"
 simulator_root = "{simulator_root}"
-# A Hugging Face dataset the store is published to; empty to keep it local.
-mirror = ""
-# A public Hugging Face model repository the four kings' weights are mirrored to; empty keeps
-# them on this host alone. HF_TOKEN (in .env beside this file) must be able to write it.
-kings_repo = ""
+# The results dataset (`mirror`, default vector-results) and the public kings repository
+# (`kings_repo`, default vector-kings) are made under the account HF_TOKEN (in .env beside this
+# file) belongs to, and a new pod restores from them. Off finney the defaults end in -test or -local.
 # The block the competition starts at: commitments made before it are ignored. Set it to the block
 # announced for this network; 0 reads every commitment on chain.
 start_block = {start_block}
@@ -42,8 +40,9 @@ start_block = {start_block}
 
 ENV = """\
 # Read into the environment by the validator and its workers; a variable already set wins.
-# The Hugging Face token the validator downloads miners' gated repositories with (they are gated
-# to its account) and writes the results mirror and kings_repo with.
+# The Hugging Face token of a permitted validator account (`hub.PERMITTED_VALIDATORS`), or the
+# validator does not start. It downloads miners' gated repositories and writes the results mirror
+# and kings_repo with write access.
 HF_TOKEN=
 """
 

@@ -8,9 +8,11 @@
     policy_python = "/abs/policy-env/bin/python"
     simulator_python = "/abs/simulator-env/bin/python"
     simulator_root = "/abs/RoboTwin-Vector"
-    mirror = "owner/vector-results"      # optional: the dataset the store is published to
-    kings_repo = "owner/vector-kings"    # optional: the public model repo the four kings are
-                                         # mirrored to; HF_TOKEN must be able to write it
+    mirror = "vector-results"            # optional: the dataset the store is published to, and
+                                         # restored from on a new pod; "" for none
+    kings_repo = "vector-kings"          # optional: the public model repo the four kings are
+                                         # mirrored to; "" for none
+                                         # both are names, under the account HF_TOKEN belongs to
     workers = 1                          # optional: units at once on each GPU, for its memory
     start_block = 4000000                # commitments made before this block are ignored; a
                                          # local chain may leave it out (0)
@@ -34,6 +36,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+from .init import ENV_FILE
 
 #: Each competition's share of the miner emission. What the competitions run here do not claim
 #: burns (to the subnet owner's hotkey). Horizon pays nothing until it opens.
@@ -61,10 +65,11 @@ class VectorConfig(LaneConfig):
     simulator_python: str = ""
     #: The RoboTwin-Vector checkout the simulator runs from.
     simulator_root: str = ""
-    #: A Hugging Face dataset the store is mirrored to; empty for none.
+    #: The name of the Hugging Face dataset the store is mirrored to, under the account HF_TOKEN
+    #: belongs to; empty for none.
     mirror: str = ""
-    #: A public Hugging Face model repository the four kings' weights are mirrored to; empty keeps
-    #: them on this host alone.
+    #: The name of the public Hugging Face model repository the four kings' weights are mirrored
+    #: to, under the account HF_TOKEN belongs to; empty keeps them on this host alone.
     kings_repo: str = ""
     store: Path = Path()
     #: Where the four kings' weights are kept (`kings.Kings`): a directory of their own.
@@ -195,14 +200,26 @@ def _vector(
     start_block = table.get("start_block", 0)
     if isinstance(start_block, bool) or not isinstance(start_block, int) or start_block < 0:
         raise ConfigError(f"{path}: [vector] start_block must be a whole number of at least 0")
+    # Under the validator's own account, whatever the host; a test or local chain's are apart from
+    # the real competition's, which the same token could otherwise write over.
+    suffix = "-local" if local(network) or network == "local" else ""
+    suffix = "-test" if network == "test" else suffix
+    repos = {"kings_repo": f"vector-kings{suffix}", "mirror": f"vector-results{suffix}"}
+    for key, default in repos.items():
+        repos[key] = str(table.get(key, default))
+        if "/" in repos[key]:
+            raise ConfigError(
+                f"{path}: [vector] {key} is a repository name, without an owner: the account is "
+                f"the one HF_TOKEN belongs to (got {repos[key]!r})"
+            )
     return VectorConfig(
         name="vector",
         share=SHARES["vector"],
         policy_python=os.path.expandvars(str(table["policy_python"])),
         simulator_python=os.path.expandvars(str(table["simulator_python"])),
         simulator_root=str(_path(root, table["simulator_root"])),
-        mirror=str(table.get("mirror", "")),
-        kings_repo=str(table.get("kings_repo", "")),
+        mirror=repos["mirror"],
+        kings_repo=repos["kings_repo"],
         workers=workers,
         start_block=start_block,
         store=data / "vector" / "store",
@@ -246,10 +263,6 @@ def _horizon(
 
 #: The competitions this build runs, and how each reads its table.
 LANES = {"vector": _vector, "horizon": _horizon}
-
-
-#: The file beside a config whose `KEY=VALUE` lines go into the environment (secrets: HF_TOKEN).
-ENV_FILE = ".env"
 
 
 def read_env(path: Path) -> dict[str, str]:

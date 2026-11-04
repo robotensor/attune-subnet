@@ -14,8 +14,8 @@ Rules, all keyed by hotkey and mapped to UIDs only at the end, because UIDs are 
   in the same proportions.
 - An entry whose hotkey is no longer registered gives its part to the burn UID rather than to the
   other champions: a champion's reward does not grow because another one left.
-- A champion whose repository is gone is not an entry at all: the lane leaves it out, and the
-  next older champion takes its place.
+- A champion an earlier build struck off is not an entry at all: the lane leaves it out, and the
+  next older champion takes its place. A miner's repository going away strikes nobody off now.
 - Everything not given to a champion goes to the burn UID. Weights sum to 1.
 
 Two cadences, one formula. `split = (0.4, 0.3, 0.2, 0.1)` is Vector's pool. `split = (1.0,)` is

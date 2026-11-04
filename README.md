@@ -30,23 +30,28 @@ demonstration of a task and must complete the same task in a different scene.
 | **Submission** | A Hugging Face model repo containing only `model.safetensors` (and an optional README). |
 | **Commitment** | `vector:<owner>/<repo>@<commit>.<digest>` on chain: the revision and the sha256 of `model.safetensors`, in base64url. `attune miner commit` builds it; repo ids can be up to 49 characters long. |
 | **Queue** | The validator queues a commitment as soon as it reads it from the chain, oldest first. **One submission per hotkey**: once a hotkey is queued, its later commitments are refused. |
-| **Scoring** | King of the hill. Each queued submission duels the current king on 160 units (16 tasks × 10), seeded from the finalized block when the duel starts. That block must come after the commitment. The challenger takes the crown when its average success rate beats the king's by 3+ points. |
+| **Scoring** | King of the hill. Each queued submission duels the current king on 240 units (16 tasks × 15), seeded from the finalized block when the duel starts. That block must come after the commitment. The challenger takes the crown when its average success rate beats the king's by 3+ points. |
 | **Rewards** | The lane's share goes to the 4 most recent champions: 40% / 30% / 20% / 10%, newest first. |
 
 ### Repositories and the kings' weights
 
-A miner's repo is gated, with the validator's Hugging Face account let in and nobody else. The
-validator checks it once, when the entry's turn comes, and downloads the weights then.
+A miner's repo is gated, with the permitted validator accounts (`hub.PERMITTED_VALIDATORS`) let in
+and nobody else. The validator checks it when the entry's turn comes, and downloads the weights then.
 
 - **Challenger not downloadable.** If the validator can't download the challenger's repo at its
-  turn (deleted, private, gated without the validator let in, or the revision is gone), the entry is
+  turn (deleted, private, gated without the validator let in, the revision is gone, or the Hub
+  errors about it), it tries three times in all, at least 90 seconds apart. Then the entry is
   dropped as `missing` and the validator duels the next one. The hotkey's one submission is used up.
-- **Hub not answering.** A Hub that doesn't answer is asked again, three times in all at least 90
-  seconds apart, before the entry is dropped as `missing`.
+- **Failures on the validator's side.** An entry whose duel keeps failing (three times) goes behind
+  the rest of the queue and keeps its submission, so nothing it does can hold the others up.
+- **The validator's own problem.** A try only counts while the validator's token works and the Hub
+  answers it. If the token is revoked or the Hub is down, the queue waits and nobody loses anything.
 - **Kings.** From the download on, the duel runs on the validator's copy, and nothing asks the miner
   to keep the repo up. The four newest crowned models - the four that are paid - are kept by the
-  validator (`var/<network>/vector/kings/`) and mirrored to a public model repo (`kings_repo`), so
-  anyone can take the weights a crown was won with. A new king pushes the oldest of the four out.
+  validator (`var/<config name>/vector/kings/`) and mirrored to a public model repo (`kings_repo`), so
+  anyone can take the weights a crown was won with. A new king pushes the oldest of the four out. No
+  duel starts until the results hold every record and the reigning king's weights are on the validator
+  and in the kings repo; the queue waits meanwhile, and a king never forfeits for lack of its weights.
 
 Submissions are weights only. Nothing a miner uploads is executed or unpickled: the safetensors
 header is checked against the pinned architecture before any tensor is read. Weights that don't
@@ -76,10 +81,13 @@ attune miner submit --dir submission/ --repo <you>/vector-mine \
     --network finney --netuid <N> --wallet.name miner --wallet.hotkey default
 ```
 
-`submit` creates the repo gated (manual approval), lets the validator's account in, uploads, then
-commits on chain. Nobody else can download your weights; if you are crowned, the validator publishes
-them in its kings repo. The repo must be downloadable by the validator at the one moment its turn
-comes: a repo it can't download then is dropped as missing.
+`submit` makes the repo private and gated (manual approval), lets the permitted validator accounts
+in, uploads, commits on chain, then takes the repo out of private, gated still. It stays private until
+then because a gated repo still shows anyone its commit and the weights' hash, which is all it takes
+to commit them first. Nobody else can download your weights; if you are crowned, the validator
+publishes them in its kings repo. The repo must be downloadable by the validator at the one moment
+its turn comes: a repo it can't download then is dropped as missing. If `submit` reports the repo is
+still private, run `attune miner reveal --repo <you>/vector-mine` at once.
 
 Check your entry with:
 
@@ -119,7 +127,6 @@ policy_python = "/abs/.venvs/vector-policy/bin/python"
 simulator_python = "/abs/.venvs/robotwin/bin/python"
 simulator_root = "/abs/RoboTwin-Vector"
 workers = 1   # units per GPU; one unit can use up to 34 GB
-kings_repo = "<validator-account>/vector-kings"   # public model repo the four kings are mirrored to
 ```
 
 ```bash
@@ -129,13 +136,25 @@ attune validator --config config/<network>.toml run
 
 `status`, `weights --dry-run` and `duel --challenger owner/name@sha` are also available.
 
-The one `HF_TOKEN` is the validator's own account: miners' repos must be gated to it, and it
-writes that account's `mirror` and `kings_repo`. A validator on another account than the default
-one needs miners to add it (`attune miner submit --validator-user <account>`, repeatable).
-Interrupted duels resume from `var/<network>/`. A validator started on another host with the
-same `mirror` takes the competition up from that dataset (the index, the king and who committed
-what; not the events or clips), and will not start on an empty store while the dataset cannot be
-read.
+`HF_TOKEN` must belong to a permitted validator account (`hub.PERMITTED_VALIDATORS`), on any network,
+or the validator does not start. It needs read access to gated repos and write access, since the
+results and the kings go under that same account: `<account>/vector-results` (`mirror`) and the public
+`<account>/vector-kings` (`kings_repo`). Both are bare names; off finney the defaults end in `-test` or
+`-local`, and `""` turns one off.
+
+Interrupted duels resume from `var/<network>/`. A new pod with the same token takes the competition up
+from the results (the index, the king and who committed what; not the events or clips), works out who
+the four kings are from how the duels went, then checks the kings repo against that: a king's weights
+missing or wrong are put right and a dethroned one removed. Results that name no king never empty the
+kings repo. The lane will not run on an empty store while the results cannot be read.
+
+Disk is looked after by itself: the oldest finished duels' files are cleared when less than 300 GB is
+free (`VECTOR_FREE_GB`), and the oldest downloaded checkpoints when `cache` holds over 200 GB
+(`VECTOR_CACHE_GB`), never the running duel's. The kings have their own copy in `kings/`.
+
+If a pod dies before its new king's weights reach the kings repo and the miner has since removed its
+repo, the queue waits and the log names the king. To go on, upload those weights to the kings repo as
+`<key>/model.safetensors`; they are checked against the sha256 the results recorded.
 
 For rented GPU pods (vast.ai, lium.io), `docker/build.sh` builds an image with all three
 environments, the assets and the checkouts. Run `pod-check --selftest` on a new pod.

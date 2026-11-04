@@ -36,7 +36,8 @@ challenger's average success rate beats the king's by the margin. The queue is w
 **Kings kept.** Nothing asks a miner to keep a repository up once its duel ran: the four newest
 crowned models - the four the subnet pays - are the validator's to serve (`kings.Kings`). Their
 weights are kept under the lane's `kings/` and mirrored to the public `kings_repo`, brought level
-at every step. A king is fetched for its duels from the orchestrator's cache, where its own duel
+at every step and after every crowning, and no duel starts until the reigning king's weights are
+in both places and the results hold its record. A king is fetched for its duels from the orchestrator's cache, where its own duel
 left it, and restored there from `kings/` on a host that has no such cache. Records of kind
 `vacate` and `retire`, written by an earlier build that struck off a champion whose repository
 was gone, still read: such a model holds no place.
@@ -137,6 +138,8 @@ class VectorLane:
         self._engine: Any = None
         #: Held by whatever reads or writes the lane's state: `refresh` runs beside a duel.
         self._lock = threading.RLock()
+        #: Whether this process has seen the mirror hold the store (`_seed`).
+        self._seeded = False
         self.kings = kings_.Kings(cfg.kings, cfg.kings_repo, token=hub_token)
 
     # -- the lane engine, built once --------------------------------------------------------
@@ -163,7 +166,8 @@ class VectorLane:
         if self.cfg.mirror:
             from vector_orchestrator.store.mirror import Mirror
 
-            mirror = Mirror(store.root, self.cfg.mirror, token=self.hub_token)
+            repo = f"{self._account()}/{self.cfg.mirror}"
+            mirror = Mirror(store.root, repo, token=self.hub_token)
             self._take_up(store, mirror, starting=True)
         if store.manifest() is None:
             with store_lock(store.root):
@@ -175,8 +179,30 @@ class VectorLane:
             kwargs=self.cfg.policy_kwargs,
         )
         return Orchestrator(
-            spec, store, runtime, self.cfg.run_dir, mirror=mirror, workers=self.cfg.workers
+            spec,
+            store,
+            runtime,
+            self.cfg.run_dir,
+            mirror=mirror,
+            workers=self.cfg.workers,
+            king_forfeits=False,
         )
+
+    def _account(self) -> str:
+        """The account HF_TOKEN belongs to, whose repositories the lane publishes to. The last
+        answer is kept: a host with a history goes on through a Hub that does not answer."""
+        kept = self.cfg.store.parent / ".hub_account"
+        try:
+            account = hub.account(token=self.hub_token)
+        except hub.NotVisible:
+            if kept.is_file():
+                return kept.read_text(encoding="utf-8").strip()
+            raise
+        if account not in hub.PERMITTED_VALIDATORS:
+            raise RuntimeError(f"HF_TOKEN belongs to {account}, which is not a permitted account")
+        kept.parent.mkdir(parents=True, exist_ok=True)
+        kept.write_text(account, encoding="utf-8")
+        return account
 
     # -- the mirror's history, taken up -----------------------------------------------------
 
@@ -224,6 +250,35 @@ class VectorLane:
         mirror = self.engine.mirror
         if mirror is not None:
             self._take_up(self.engine.store, mirror, starting=False)
+
+    def _results_behind(self) -> str | None:
+        """Why the results mirror does not hold all of this store, after pushing what it lacks; None
+        when it does, or there is none. Only what a publish touches is pushed otherwise, so a store
+        older than its mirror (an upgrade, a repository renamed) would never reach it, and a new
+        pod would read an empty history."""
+        from vector_orchestrator.store.mirror import local_seq
+
+        mirror, store = self.engine.mirror, self.engine.store
+        if mirror is None:
+            return None
+
+        def behind() -> bool:
+            return int((mirror.head() or {}).get("seq") or 0) < local_seq(store.root)
+
+        try:
+            # A kill between a record's append and the head's write leaves the head behind for
+            # good: nothing else rewrites it until a duel runs, and this would hold every duel.
+            if int((store.head() or {}).get("seq") or 0) != local_seq(store.root):
+                store.rebuild_head()
+                log.warning("the store's head was behind its index; rebuilt")
+            self.engine.push_touched()
+            if behind() or (not self._seeded and mirror.read("manifest.json") is None):
+                mirror.push_all("the store's history")
+                log.info("the whole store went to %s, which lacked it", mirror.repo)
+            self._seeded = True
+            return f"{mirror.repo} lacks records this store holds" if behind() else None
+        except Exception as exc:  # noqa: BLE001 - the next step tries again
+            return f"the results could not be brought level: {type(exc).__name__}: {exc}"
 
     @property
     def spec(self) -> Any:
@@ -402,8 +457,9 @@ class VectorLane:
                 )
                 record["request"] = req.as_dict(self.spec)
                 self.state.save()
-        if king is not None:
-            self._restore_king(king)
+        if king is not None and not self._restore_king(king):
+            # A duel on a king whose weights are not here would hand it a forfeit it did not earn.
+            return {"status": "waiting", "reason": f"the king {king.key}'s weights are not here"}
         try:
             with store_lock(self.engine.store.root):
                 result = self.engine.run(req)
@@ -491,39 +547,67 @@ class VectorLane:
         with self._lock:
             entries = self.state.lane(LANE)["entries"]
             for model in newest:
-                model["sha256"] = (entries.get(model["key"]) or {}).get("weights_sha256")
+                record = entries.get(model["key"]) or {}
+                model["sha256"] = record.get("weights_sha256") or record.get("digest")
         return newest
 
-    def keep_kings(self) -> None:
-        """`kings/` brought to the newest crowned models, and the Hub copy brought level. The
-        weights of a king not kept yet come from the orchestrator's cache (its own duel left them
-        there), else from the Hub copy, else from the miner's repository while it still answers;
-        one found nowhere now is tried again next step. Never raises."""
+    def keep_kings(self) -> str | None:
+        """`kings/` brought to the newest crowned models, the results brought level, and the Hub
+        copy brought level with them, in that order, so it never names a king the results do not.
+        The weights of a king not kept yet come from the orchestrator's cache (its own duel left
+        them there), else from the Hub copy, else from the miner's repository while it still
+        answers; one found nowhere now is tried again next step. Why no duel may start now, or None:
+        the results are behind, the reigning king is not resolved, or the Hub copy names kings and
+        the results none, which a first crowning would wipe. Never raises."""
         try:
             missing = self.kings.keep(self.kept_models(), self._king_weights)
             if missing:
                 log.warning("kings: weights not found yet for %s", missing)
+            if (behind := self._results_behind()) is not None:
+                return behind
+            king = (self.engine.store.head() or {}).get("king")
+            if not king:
+                named = self.kings.named_on_hub()
+                return f"the kings repository names {named}; the results no king" if named else None
             self.kings.publish()
-        except Exception:  # noqa: BLE001 - the next step tries again
+            key = str(king["key"])
+            if not self.kings.resolved(key):
+                where = f"{king.get('repo')}@{king.get('revision')}"
+                return (
+                    f"the king {key} ({where}) is not both here and on {self.kings.name}. If this "
+                    "does not clear by itself, put its weights on the kings repository as "
+                    f"{key}/{hub.WEIGHTS_FILE}"
+                )
+            return None
+        except Exception as exc:  # noqa: BLE001 - the next step tries again
             log.exception("keeping the kings failed")
+            return f"{type(exc).__name__}: {exc}"
 
     def _king_weights(self, model: dict[str, Any]) -> Path | None:
         from vector_orchestrator.submissions.resolve import Resolved
+
+        expected = model.get("sha256")
+
+        def right(path: Path) -> bool:
+            return path.is_file() and (not expected or hub.sha256_of(path) == expected)
 
         cache = self.engine.runtime.cache
         resolved = Resolved(repo=model["repo"], revision=model["revision"], sha=model["revision"])
         if cache.lookup(resolved) is not None:
             path = cache.checkout(model["revision"]) / hub.WEIGHTS_FILE
-            if path.is_file():
+            if right(path):
                 return path
         found = self.kings.fetch_from_hub(model["key"])
         if found is not None:
-            return found
+            if right(found):
+                return found
+            log.warning("kings: the Hub copy of %s is wrong; asking its repository", model["key"])
+            found.unlink(missing_ok=True)
         return self.kings.fetch_from_miner(model["repo"], model["revision"])
 
-    def _restore_king(self, king: Any) -> None:
+    def _restore_king(self, king: Any) -> bool:
         """The king's weights into the orchestrator's cache from `kings/`, on a host that has no
-        checkout of it: the duel then fetches it without asking the Hub."""
+        checkout of it: the duel then fetches it without asking the Hub. Whether they are there."""
         import shutil
 
         from vector_orchestrator.submissions.resolve import Resolved
@@ -531,10 +615,13 @@ class VectorLane:
         cache = self.engine.runtime.cache
         resolved = Resolved(repo=king.repo, revision=king.revision, sha=king.revision)
         kept = self.kings.path(king.key)
-        if cache.lookup(resolved) is not None or not kept.is_file():
-            return
+        if cache.lookup(resolved) is not None:
+            return True
+        if not kept.is_file():
+            return False
         cache.store(resolved, lambda into: shutil.copyfile(kept, into / hub.WEIGHTS_FILE))
         log.info("kings: %s restored into the cache from kings/", king.key)
+        return True
 
     def _struck(self, index: list[dict[str, Any]] | None = None) -> set[str]:
         """The models the store's index (or `index`, read from it) has vacated or retired."""
@@ -569,12 +656,14 @@ class VectorLane:
             self.sync()
         except StoreDiverged as exc:
             return Progress(LANE, FAILED, f"the store and its mirror disagree: {exc}")
-        self.keep_kings()
+        unresolved = self.keep_kings()
         self.publish_queue(self.queue())
         self.publish_champions()
         queue = self.queue()
         if not queue:
             return Progress(LANE, IDLE, "nothing queued")
+        if unresolved is not None:
+            return Progress(LANE, WAITING, f"the kings are not resolved: {unresolved}")
         passed = []
         for entry in queue:
             log.info(

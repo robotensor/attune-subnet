@@ -292,6 +292,25 @@ def test_reveal_takes_the_repository_out_of_private_and_nothing_else(monkeypatch
     assert calls == [(False, None)]
 
 
+def test_a_connection_that_fails_is_the_hub_not_answering():
+    """Hub 2.x raises its HTTP library's own errors, which are not OSErrors."""
+    from types import SimpleNamespace
+
+    from robotensor import hub
+
+    class ConnectError(Exception):
+        pass
+
+    def refused(*a, **kw):
+        raise ConnectError("no route")
+
+    api = SimpleNamespace(model_info=refused, auth_check=refused)
+    with pytest.raises(hub.HubUnreachable, match="no route"):
+        hub.inspect("a/b", "1" * 40, hub.vector_shape({hub.WEIGHTS_FILE}), api=api)
+    with pytest.raises(hub.HubUnreachable, match="no route"):
+        hub.accessible("a/b", api=api)
+
+
 @pytest.mark.parametrize(
     ("whoami", "problem"),
     [
@@ -319,3 +338,12 @@ def test_token_problem_says_what_is_wrong_with_the_validator_itself(monkeypatch,
     assert found is None if problem is None else problem in found
 
 
+@pytest.mark.parametrize("name", ["a/b..c", "a--b/c", "a/b.git", "a/b-"])
+def test_a_name_the_hub_would_never_take_is_not_visible(name):
+    """The commitment's format lets these through, and the Hub's client raises before it asks
+    anything. Uncaught, one of them would hold the queue's head for ever."""
+    from robotensor import hub
+
+    shape = hub.vector_shape({hub.WEIGHTS_FILE})
+    with pytest.raises(hub.NotVisible, match="not a repository name"):
+        hub.inspect(name, "1" * 40, shape)

@@ -62,6 +62,14 @@ class FakeHub:
         return SimpleNamespace(sha=revision, siblings=siblings)
 
 
+@pytest.fixture(autouse=True)
+def sound_token(monkeypatch):
+    """The validator's own token works, unless a test says otherwise."""
+    from robotensor import hub
+
+    monkeypatch.setattr(hub, "token_problem", lambda **kw: None)
+
+
 @pytest.fixture
 def lane(tmp_path):
     from vector_orchestrator.spec import load_spec
@@ -437,6 +445,18 @@ def test_a_queued_commitment_is_the_hotkeys_one_shot_whatever_its_repository_hol
     assert later.status == "refused"
 
 
+def past_the_tries(lane, monkeypatch):
+    """Steps, `HUB_GAP_S` apart, until the entry at the head has had all its tries."""
+    from robotensor.lanes import vector
+
+    clock = [1000.0]
+    monkeypatch.setattr(vector, "_now", lambda: clock[0])
+    for _ in range(vector.HUB_TRIES):
+        progress = lane.step(chain=FakeChain())
+        clock[0] += vector.HUB_GAP_S
+    return progress
+
+
 def test_a_challenger_the_hub_does_not_show_is_skipped_for_the_next(lane, hub_of, monkeypatch):
     from robotensor.lanes.base import WORKED
 
@@ -445,7 +465,7 @@ def test_a_challenger_the_hub_does_not_show_is_skipped_for_the_next(lane, hub_of
     asked = []
     monkeypatch.setattr(lane.engine, "run", genesis_run(asked))
 
-    progress = lane.step(chain=FakeChain())
+    progress = past_the_tries(lane, monkeypatch)
 
     assert progress.outcome == WORKED
     assert [r.challenger.repo for r in asked] == ["m/two"]
@@ -506,6 +526,71 @@ def test_a_step_sooner_than_the_gap_after_a_silent_hub_waits_without_asking(lane
     assert len(asked) == 2
 
 
+def test_a_token_that_stopped_working_uses_nobodys_submission_up(lane, hub_of, monkeypatch):
+    """Revoked or regenerated while the validator runs: every repository then looks shut. The queue
+    waits, no try is counted, and with a working token all of it goes on."""
+    from robotensor import hub
+    from robotensor.lanes.base import WAITING, WORKED
+
+    hub_of({f"m/one@{A}": {"model.safetensors": "w1"}, f"m/two@{B}": {"model.safetensors": "w2"}})
+    fake_refusal = hub.inspect
+
+    def refused(*a, **kw):
+        raise hub.NotVisible("401")
+
+    monkeypatch.setattr(hub, "inspect", refused)
+    monkeypatch.setattr(hub, "token_problem", lambda **kw: "the Hub refuses this token")
+    lane.intake([c("hk1", "m/one", A, 10), c("hk2", "m/two", B, 20)], 30)
+    for _ in range(10):
+        progress = lane.step(chain=FakeChain())
+        assert progress.outcome == WAITING and "refuses this token" in progress.detail
+    assert statuses(lane) == {"hk1": "queued", "hk2": "queued"}
+    assert all("hub_tries" not in r for r in lane.state.lane("vector")["entries"].values())
+
+    monkeypatch.setattr(hub, "inspect", fake_refusal)
+    monkeypatch.setattr(hub, "token_problem", lambda **kw: None)
+    monkeypatch.setattr(lane.engine, "run", genesis_run([]))
+    assert lane.step(chain=FakeChain()).outcome == WORKED
+
+
+def test_a_hub_down_for_everything_uses_nobodys_submission_up(lane, monkeypatch):
+    from robotensor import hub
+    from robotensor.lanes import vector
+
+    def down(*a, **kw):
+        raise hub.HubUnreachable("503")
+
+    clock = [1000.0]
+    monkeypatch.setattr(vector, "_now", lambda: clock[0])
+    monkeypatch.setattr(hub, "inspect", down)
+    monkeypatch.setattr(hub, "token_problem", lambda **kw: "the Hub did not answer")
+    lane.intake([c("hk1", "m/one", A, 10)], 30)
+    for _ in range(20):
+        lane.step(chain=FakeChain())
+        clock[0] += vector.HUB_GAP_S
+    assert statuses(lane) == {"hk1": "queued"}
+
+
+def test_a_repository_still_private_after_its_commit_gets_its_three_tries(
+    lane, hub_of, monkeypatch
+):
+    """The chain has the commitment and `reveal` is a moment behind it, or was run by hand."""
+    from robotensor.lanes import vector
+    from robotensor.lanes.base import WAITING, WORKED
+
+    clock = [1000.0]
+    monkeypatch.setattr(vector, "_now", lambda: clock[0])
+    fake = hub_of({})
+    lane.intake([c("hk1", "m/one", A, 10)], 30)
+    monkeypatch.setattr(lane.engine, "run", genesis_run([]))
+    assert lane.step(chain=FakeChain()).outcome == WAITING
+    assert statuses(lane) == {"hk1": "queued"}
+    clock[0] += vector.HUB_GAP_S
+    fake.repos[f"m/one@{A}"] = {"model.safetensors": "w1"}
+    assert lane.step(chain=FakeChain()).outcome == WORKED
+    assert statuses(lane) == {"hk1": "crowned"}
+
+
 def test_a_gated_repository_the_validator_is_not_let_into_is_missing(lane, hub_of, monkeypatch):
     """Its metadata shows to anyone, so the digest check passes; the download would not."""
     fake = hub_of(
@@ -516,7 +601,7 @@ def test_a_gated_repository_the_validator_is_not_let_into_is_missing(lane, hub_o
     asked = []
     monkeypatch.setattr(lane.engine, "run", genesis_run(asked))
 
-    lane.step(chain=FakeChain())
+    past_the_tries(lane, monkeypatch)
 
     assert [r.challenger.repo for r in asked] == ["m/two"]
     assert statuses(lane) == {"hk1": "missing", "hk2": "crowned"}
@@ -707,6 +792,30 @@ def test_a_folder_that_is_not_a_kings_is_never_removed(tmp_path):
         Kings("relative/kings")
 
 
+def test_a_badly_named_entry_is_dropped_and_the_next_one_duels(lane, hub_of, monkeypatch):
+    """`a/b..c` passes the commitment's format; the Hub's client raises before asking anything."""
+    from huggingface_hub.utils import validate_repo_id
+
+    fake = hub_of({f"m/two@{B}": {"model.safetensors": "w2"}})
+    plain = fake.model_info
+
+    def model_info(repo, revision, files_metadata):
+        validate_repo_id(repo)
+        return plain(repo, revision, files_metadata)
+
+    fake.model_info = model_info
+    lane.intake([c("hk1", "a/b..c", A, 10), c("hk2", "m/two", B, 20)], 30)
+    asked = []
+    monkeypatch.setattr(lane.engine, "run", genesis_run(asked))
+
+    past_the_tries(lane, monkeypatch)
+
+    entries = lane.state.lane("vector")["entries"].values()
+    bad = next(e for e in entries if e["repo"] == "a/b..c")
+    assert bad["status"] == "missing" and "not a repository name" in bad["reason"]
+    assert [r.challenger.repo for r in asked] == ["m/two"]
+
+
 def test_a_king_is_restored_into_the_cache_from_kings_before_its_duel(lane, hub_of, monkeypatch):
     """A host with no checkout of the king fetches it from `kings/`, never from the miner."""
     from vector_orchestrator.submissions.resolve import Resolved
@@ -777,6 +886,45 @@ def test_a_hub_copy_that_cannot_be_written_is_tried_again_next_time(tmp_path):
     kings.keep([{"key": "a", "repo": "m/a", "revision": "1" * 40}], lambda m: tmp_path / "w")
     assert kings.publish() is False
     assert not (tmp_path / "kings" / "published.json").exists()
+
+
+def test_a_resumed_duel_waits_for_a_token_that_works_too(lane, hub_of, monkeypatch):
+    """Admitted, then the token went: the download would read as the entry being shut."""
+    from robotensor import hub
+    from robotensor.lanes.base import WAITING, WORKED
+
+    hub_of({f"m/one@{A}": {"model.safetensors": "w1"}})
+    lane.intake([c("hk1", "m/one", A, 10)], 30)
+    from vector_orchestrator.duel.orchestrate import DuelFailed
+
+    def fails(req):
+        raise DuelFailed("harness")
+
+    monkeypatch.setattr(lane.engine, "run", fails)
+    lane.step(chain=FakeChain())
+    asked = []
+    monkeypatch.setattr(lane.engine, "run", genesis_run(asked))
+    monkeypatch.setattr(hub, "token_problem", lambda **kw: "the Hub refuses this token")
+    assert lane.step(chain=FakeChain()).outcome == WAITING and not asked
+    assert statuses(lane) == {"hk1": "queued"}
+    monkeypatch.setattr(hub, "token_problem", lambda **kw: None)
+    assert lane.step(chain=FakeChain()).outcome == WORKED and asked
+
+
+def test_the_tries_start_again_after_an_admission(lane, hub_of, monkeypatch):
+    from robotensor.lanes import vector
+
+    clock = [1000.0]
+    monkeypatch.setattr(vector, "_now", lambda: clock[0])
+    fake = hub_of({})
+    lane.intake([c("hk1", "m/one", A, 10)], 30)
+    lane.step(chain=FakeChain())
+    fake.repos[f"m/one@{A}"] = {"model.safetensors": "w1"}
+    clock[0] += vector.HUB_GAP_S
+    monkeypatch.setattr(lane.engine, "run", genesis_run([]))
+    lane.step(chain=FakeChain())
+    (record,) = lane.state.lane("vector")["entries"].values()
+    assert "hub_tries" not in record and "hub_tried_at" not in record
 
 
 # -- another host takes the lane up from the mirror -----------------------------------------------

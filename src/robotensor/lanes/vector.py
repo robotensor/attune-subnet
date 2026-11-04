@@ -19,10 +19,12 @@ finalized head, which must come after the challenger's commitment (`protocol.see
 then, the challenger is looked up on the Hub (`hub.inspect`):
 
 - a repository the validator cannot download (deleted, private, gated without the validator let
-  in, a revision it does not have) is `missing`: it leaves the queue and the next entry duels
-  instead. That is the one moment a miner's repository must answer: once fetched, the duel runs
-  on the copy. A Hub that does not answer is asked again, `HUB_TRIES` times in all with at least
-  `HUB_GAP_S` between them, and then the entry is `missing` too;
+  in, a revision it does not have) or a Hub that does not answer about it is asked again,
+  `HUB_TRIES` times in all with at least `HUB_GAP_S` between them, and then the entry is `missing`:
+  it leaves the queue and the next entry duels instead. That is the one moment a miner's repository
+  must answer: once fetched, the duel runs on the copy. A try counts only while this validator's
+  own token works and the Hub answers it (`hub.token_problem`): otherwise the queue waits, and
+  nobody's submission is used up by what is not their doing;
 - a repository holding anything but the weights and a README, or weights that do not hash to the
   committed digest, is `refused`; weights byte-identical to an earlier entry's are a `duplicate`;
 The oldest admitted entry takes an empty throne by genesis, scored on its own units; otherwise it
@@ -90,7 +92,7 @@ MISSING = "missing"
 STRUCK = ("vacate", "retire")
 VACATED = "vacated"
 RETIRED = "retired"
-#: How many times a Hub that does not answer is asked about a challenger before the entry is
+#: How many times the Hub is asked for a challenger it will not give before the entry is
 #: `missing`, and the least time between two of those tries (a step that comes sooner waits).
 HUB_TRIES = 3
 HUB_GAP_S = 90.0
@@ -378,6 +380,9 @@ class VectorLane:
             # A duel resumed after a restart keeps its request (the same seed and block).
             request = record.get("request")
             if request and request.get("king") == (king.as_dict() if king else None):
+                if (problem := hub.token_problem(token=self.hub_token)) is not None:
+                    log.error("the queue waits: %s", problem)
+                    return {"status": "waiting", "reason": f"not the entry's doing: {problem}"}
                 req = DuelRequest.from_dict(request)
             else:
                 passed = self._admit(entry, record)
@@ -429,19 +434,18 @@ class VectorLane:
         try:
             found = hub.inspect(entry.repo, entry.revision, self.shape, token=self.hub_token)
             hub.accessible(entry.repo, token=self.hub_token)
-        except hub.HubUnreachable as exc:
+        except hub.NotVisible as exc:
+            if (problem := hub.token_problem(token=self.hub_token)) is not None:
+                log.error("the queue waits, and no try is counted: %s", problem)
+                return {"status": "waiting", "reason": f"not the entry's doing: {problem}"}
             tries = int(record.get("hub_tries", 0)) + 1
             record["hub_tries"] = tries
             record["hub_tried_at"] = _now()
             if tries < HUB_TRIES:
-                record["reason"] = f"the Hub did not answer ({tries} of {HUB_TRIES}): {exc}"
+                record["reason"] = f"not downloadable ({tries} of {HUB_TRIES}): {exc}"
                 self.state.save()
                 return {"status": "waiting", "reason": record["reason"]}
-            record.update(status=MISSING, reason=f"the Hub did not answer {tries} times: {exc}")
-            self.state.save()
-            return {"status": "skipped", "reason": record["reason"]}
-        except hub.NotVisible as exc:
-            record.update(status=MISSING, reason=f"not downloadable: {exc}")
+            record.update(status=MISSING, reason=f"not downloadable after {tries} tries: {exc}")
             self.state.save()
             return {"status": "skipped", "reason": record["reason"]}
         except hub.NotASubmission as exc:
@@ -467,6 +471,8 @@ class VectorLane:
             return {"status": "skipped", "reason": record["reason"]}
         by_weights[found.weights_sha256] = entry.key
         record["reason"] = ""
+        record.pop("hub_tries", None)
+        record.pop("hub_tried_at", None)
         self.state.save()
         return None
 

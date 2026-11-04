@@ -218,6 +218,7 @@ def inspect(
     from huggingface_hub.errors import (
         GatedRepoError,
         HfHubHTTPError,
+        HFValidationError,
         RepositoryNotFoundError,
         RevisionNotFoundError,
     )
@@ -225,6 +226,9 @@ def inspect(
     api = api or HfApi(token=token or None)  # an empty token is no token
     try:
         info = api.model_info(repo, revision=revision, files_metadata=True)
+    except HFValidationError as exc:
+        # The commitment's own format passes names the Hub would never take (`a/b..c`).
+        raise NotVisible(f"{repo}: not a repository name the Hub takes: {exc}") from None
     except (RepositoryNotFoundError, RevisionNotFoundError, GatedRepoError) as exc:
         raise NotVisible(f"{repo}@{revision}: {type(exc).__name__}") from None
     except HfHubHTTPError as exc:
@@ -232,7 +236,7 @@ def inspect(
         if status in (401, 403, 404):
             raise NotVisible(f"{repo}@{revision}: {exc}") from None
         raise HubUnreachable(f"{repo}@{revision}: {exc}") from None
-    except OSError as exc:  # requests' connection errors and timeouts are OSErrors
+    except Exception as exc:  # noqa: BLE001 - a connection that failed is the HTTP library's own
         raise HubUnreachable(f"{repo}@{revision}: {type(exc).__name__}: {exc}") from None
     if getattr(info, "sha", None) != revision:
         raise NotVisible(f"{repo}@{revision}: the Hub resolved it to {getattr(info, 'sha', None)}")
@@ -290,7 +294,7 @@ def accessible(repo: str, *, api: Any = None, token: str | None = None) -> None:
         if status in (401, 403, 404):
             raise NotVisible(f"{repo}: {exc}") from None
         raise HubUnreachable(f"{repo}: {exc}") from None
-    except OSError as exc:
+    except Exception as exc:  # noqa: BLE001 - a connection that failed is the HTTP library's own
         raise HubUnreachable(f"{repo}: {type(exc).__name__}: {exc}") from None
 
 

@@ -292,3 +292,30 @@ def test_reveal_takes_the_repository_out_of_private_and_nothing_else(monkeypatch
     assert calls == [(False, None)]
 
 
+@pytest.mark.parametrize(
+    ("whoami", "problem"),
+    [
+        ({"name": "v"}, None),
+        ({"name": "v", "auth": {"accessToken": {"fineGrained": {}}}}, "may not read gated"),
+        (OSError("no route"), "no route"),
+    ],
+)
+def test_token_problem_says_what_is_wrong_with_the_validator_itself(monkeypatch, whoami, problem):
+    import huggingface_hub
+
+    from robotensor import hub
+
+    class Api:
+        def __init__(self, token=None):
+            pass
+
+        def whoami(self):
+            if isinstance(whoami, Exception):
+                raise whoami
+            return whoami
+
+    monkeypatch.setattr(huggingface_hub, "HfApi", Api)
+    found = hub.token_problem(token="t")
+    assert found is None if problem is None else problem in found
+
+

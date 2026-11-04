@@ -121,7 +121,7 @@ def run(cfg: Config, name: str, *, once: bool = False) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    from .validator import _logging
+    from .validator import _logging, refused
 
     _logging()
     parser = argparse.ArgumentParser(prog="robotensor-worker", description=__doc__.split("\n")[0])
@@ -130,6 +130,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--once", action="store_true", help="one step, then exit")
     args = parser.parse_args(argv)
     cfg = load(args.config)
+    if refused():
+        return 1
     return run(cfg, args.lane, once=args.once)
 
 

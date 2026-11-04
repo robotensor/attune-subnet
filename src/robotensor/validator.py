@@ -23,7 +23,7 @@ import threading
 from typing import Any
 
 from . import chain as chain_
-from . import supervisor
+from . import hub, supervisor
 from .config import Config, load
 from .lanes.vector import Entry, VectorLane
 from .protocol import weights as weights_
@@ -90,8 +90,41 @@ class WeightsThread(threading.Thread):
         chain.close()
 
 
+def hub_account_problem() -> str | None:
+    """Why this validator must not start: HF_TOKEN does not belong to a permitted validator
+    account, on any network. A Hub that cannot say whose token it is stops the start too. This is
+    the one thing that does."""
+    permitted = ", ".join(hub.PERMITTED_VALIDATORS)
+    token = hub_token()
+    if token is None:
+        return f"HF_TOKEN is not set: it must be the Hub token of a permitted account ({permitted})"
+    try:
+        found = hub.account(token=token)
+    except hub.NotVisible as exc:
+        return f"could not check that HF_TOKEN belongs to a permitted account ({permitted}): {exc}"
+    if found not in hub.PERMITTED_VALIDATORS:
+        return f"HF_TOKEN belongs to {found}, which is not a permitted account ({permitted})"
+    return None
+
+
+def refused() -> bool:
+    """Whether this command stops here, said on stderr, for `hub_account_problem`."""
+    problem = hub_account_problem()
+    if problem is not None:
+        print(f"not starting: {problem}", file=sys.stderr)
+    return problem is not None
+
+
 def cmd_run(args: argparse.Namespace, cfg: Config) -> int:
     """Every configured competition, each in a worker of its own, and the weights thread."""
+    if refused():
+        return 1
+    if (problem := hub.token_problem(token=hub_token())) is not None:
+        log.warning("the queue will wait until this is put right: %s", problem)
+    if "vector" in cfg.lanes:
+        for key in ("mirror", "kings_repo"):
+            if not getattr(cfg.vector, key):
+                log.warning("[vector] %s is empty: nothing of it is published or restored", key)
     wallet = chain_.wallet(cfg.wallet_name, cfg.wallet_hotkey, cfg.wallet_path)
     weights = WeightsThread(cfg, str(cfg.state), wallet) if not args.no_weights else None
     if weights is not None:
@@ -100,6 +133,8 @@ def cmd_run(args: argparse.Namespace, cfg: Config) -> int:
 
 
 def cmd_intake(args: argparse.Namespace, cfg: Config) -> int:
+    if refused():
+        return 1
     state = State(cfg.state)
     vector = lane(cfg, state)
     chain = chain_.Chain(cfg.network, cfg.netuid)
@@ -110,6 +145,8 @@ def cmd_intake(args: argparse.Namespace, cfg: Config) -> int:
 
 
 def cmd_duel(args: argparse.Namespace, cfg: Config) -> int:
+    if refused():
+        return 1
     state = State(cfg.state)
     vector = lane(cfg, state)
     chain = chain_.Chain(cfg.network, cfg.netuid)
@@ -146,6 +183,8 @@ def cmd_duel(args: argparse.Namespace, cfg: Config) -> int:
 
 
 def cmd_weights(args: argparse.Namespace, cfg: Config) -> int:
+    if not args.dry_run and refused():
+        return 1
     state = State(cfg.state)
     vector = lane(cfg, state)
     chain = chain_.Chain(cfg.network, cfg.netuid)

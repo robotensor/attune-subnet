@@ -294,6 +294,49 @@ def accessible(repo: str, *, api: Any = None, token: str | None = None) -> None:
         raise HubUnreachable(f"{repo}: {type(exc).__name__}: {exc}") from None
 
 
+def _whoami(api: Any, token: str | None) -> dict[str, Any]:
+    """What the Hub says of `token`. `NotVisible` when it refuses the token; `HubUnreachable` when
+    it did not answer."""
+    from huggingface_hub import HfApi
+    from huggingface_hub.errors import HfHubHTTPError
+
+    api = api or HfApi(token=token or None)
+    try:
+        return dict(api.whoami())
+    except HfHubHTTPError as exc:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        if status in (401, 403):
+            raise NotVisible(f"the Hub refuses this token: {exc}") from None
+        raise HubUnreachable(f"the Hub did not say whose token this is: {exc}") from None
+    except Exception as exc:  # noqa: BLE001 - a connection that failed is the HTTP library's own
+        raise HubUnreachable(f"the Hub did not answer: {type(exc).__name__}: {exc}") from None
+
+
+def account(*, api: Any = None, token: str | None = None) -> str:
+    """The Hub account `token` belongs to; raises as `_whoami` does."""
+    return str(_whoami(api, token)["name"])
+
+
+def reads_gated(*, api: Any = None, token: str | None = None) -> bool:
+    """Whether `token` may download a gated repository its account was let into: a fine-grained
+    token only with that permission ticked, which nothing but this says before a download is
+    refused. Raises as `_whoami` does."""
+    fine = _whoami(api, token).get("auth", {}).get("accessToken", {}).get("fineGrained")
+    return fine is None or bool(fine.get("canReadGatedRepos"))
+
+
+def token_problem(*, token: str | None = None) -> str | None:
+    """Why the Hub's refusal of a submission cannot be believed: this token no longer works, may
+    not read gated repositories, or the Hub is not answering at all. None when the token is sound,
+    so that a refusal is the submission's own doing."""
+    try:
+        if not reads_gated(token=token):
+            return "this fine-grained HF_TOKEN may not read gated repositories"
+    except NotVisible as exc:
+        return str(exc)
+    return None
+
+
 def upload_weights(
     repo: str,
     weights: str,

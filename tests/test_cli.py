@@ -313,3 +313,112 @@ def test_init_s_next_steps_give_commit_everything_it_requires():
 # -- the Hub account a validator starts on ---------------------------------------------------------
 
 
+def _validator_config(tmp_path, **vector):
+    from robotensor.config import load
+    from robotensor.init import validator
+
+    path = validator(tmp_path / "node")
+    text = path.read_text()
+    for key, value in vector.items():
+        text = text.replace(f'{key} = ""', f'{key} = "{value}"')
+    path.write_text(text)
+    return load(path)
+
+
+@pytest.mark.parametrize(
+    ("token", "account", "wanted"),
+    [
+        (None, "angelecho", "HF_TOKEN is not set"),
+        ("t", "someone", "belongs to someone, which is not a permitted account (angelecho)"),
+        ("t", "angelecho", None),
+    ],
+)
+def test_only_a_permitted_account_starts(monkeypatch, token, account, wanted):
+    from robotensor import hub, validator
+
+    monkeypatch.setattr(validator, "hub_token", lambda: token)
+    monkeypatch.setattr(hub, "account", lambda **kw: account)
+    problem = validator.hub_account_problem()
+    assert problem is None if wanted is None else wanted in problem
+
+
+def test_the_start_check_holds_on_a_local_chain_too(tmp_path, monkeypatch, capsys):
+    from argparse import Namespace
+
+    from robotensor import hub, validator
+    from robotensor.config import load
+
+    (tmp_path / "x.toml").write_text(
+        'network = "ws://127.0.0.1:9944"\nnetuid = 1\n[vector]\npolicy_python = "p"\n'
+        'simulator_python = "s"\nsimulator_root = "/r"\n'
+    )
+    monkeypatch.setattr(validator, "hub_token", lambda: "t")
+    monkeypatch.setattr(hub, "account", lambda **kw: "someone")
+    args = Namespace(no_weights=True, once=True, dry_run=False, challenger=None)
+    cfg = load(tmp_path / "x.toml")
+    for command in (
+        validator.cmd_run,
+        validator.cmd_duel,
+        validator.cmd_intake,
+        validator.cmd_weights,
+    ):
+        assert command(args, cfg) == 1
+        assert "not a permitted account" in capsys.readouterr().err
+
+
+def test_a_worker_started_by_hand_is_held_to_the_same_check(tmp_path, monkeypatch, capsys):
+    from robotensor import hub, validator, worker
+
+    (tmp_path / "x.toml").write_text(
+        'network = "ws://127.0.0.1:9944"\nnetuid = 1\n[vector]\npolicy_python = "p"\n'
+        'simulator_python = "s"\nsimulator_root = "/r"\n'
+    )
+    monkeypatch.setattr(validator, "hub_token", lambda: "t")
+    monkeypatch.setattr(hub, "account", lambda **kw: "someone")
+    monkeypatch.setattr(worker, "run", lambda *a, **kw: pytest.fail("it ran"))
+    assert worker.main(["--config", str(tmp_path / "x.toml"), "--lane", "vector"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("access", "reads"),
+    [
+        ({"role": "write"}, True),
+        ({"role": "fineGrained", "fineGrained": {"canReadGatedRepos": True}}, True),
+        ({"role": "fineGrained", "fineGrained": {"canReadGatedRepos": False}}, False),
+        ({"role": "fineGrained", "fineGrained": {}}, False),
+    ],
+)
+def test_reads_gated_is_what_the_hub_says_of_the_token(access, reads):
+    from types import SimpleNamespace
+
+    from robotensor import hub
+
+    api = SimpleNamespace(whoami=lambda: {"name": "v", "auth": {"accessToken": access}})
+    assert hub.reads_gated(api=api) is reads
+
+
+def test_a_hub_that_cannot_say_whose_token_it_is_stops_the_start(tmp_path, monkeypatch):
+    from robotensor import hub, validator
+
+    def unreachable(**kw):
+        raise hub.HubUnreachable("no answer")
+
+    monkeypatch.setattr(validator, "hub_token", lambda: "t")
+    monkeypatch.setattr(hub, "account", unreachable)
+    assert "no answer" in validator.hub_account_problem()
+
+
+def test_a_refused_start_starts_nothing(tmp_path, monkeypatch, capsys):
+    from argparse import Namespace
+
+    from robotensor import chain, validator
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("started")
+
+    cfg = _validator_config(tmp_path)
+    monkeypatch.setattr(validator, "hub_token", lambda: None)
+    monkeypatch.setattr(chain, "wallet", forbidden)
+    monkeypatch.setattr(validator.supervisor, "run", forbidden)
+    assert validator.cmd_run(Namespace(no_weights=False, once=True), cfg) == 1
+    assert "not starting: HF_TOKEN is not set" in capsys.readouterr().err

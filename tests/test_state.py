@@ -10,20 +10,20 @@ from robotensor.state import EMPTY, State
 def test_each_lane_has_a_document_of_its_own(tmp_path):
     state = State(tmp_path / "state")
     state.lane("vector")["entries"]["k"] = {"hotkey": "hk"}
-    state.lane("horizon")["entries"]["j"] = {"hotkey": "other"}
+    state.lane("other")["entries"]["j"] = {"hotkey": "other"}
 
     state.save()
 
     assert json.loads((tmp_path / "state" / "vector.json").read_text())["entries"] == {
         "k": {"hotkey": "hk"}
     }
-    assert json.loads((tmp_path / "state" / "horizon.json").read_text())["entries"] == {
+    assert json.loads((tmp_path / "state" / "other.json").read_text())["entries"] == {
         "j": {"hotkey": "other"}
     }
 
 
 def test_a_lane_nothing_has_written_yet_reads_as_an_empty_one(tmp_path):
-    assert State(tmp_path / "state").lane("horizon") == EMPTY
+    assert State(tmp_path / "state").lane("other") == EMPTY
 
 
 def test_writing_a_lane_does_not_touch_another_lanes_document(tmp_path):
@@ -34,11 +34,11 @@ def test_writing_a_lane_does_not_touch_another_lanes_document(tmp_path):
     first.save()
 
     second = State(tmp_path / "state")
-    second.lane("horizon")["block_counter"] = 99
+    second.lane("other")["block_counter"] = 99
     second.save()
 
     assert State(tmp_path / "state").lane("vector")["block_counter"] == 7
-    assert State(tmp_path / "state").lane("horizon")["block_counter"] == 99
+    assert State(tmp_path / "state").lane("other")["block_counter"] == 99
 
 
 def test_the_single_document_it_used_to_be_is_split_and_kept(tmp_path):

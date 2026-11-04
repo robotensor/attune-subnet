@@ -121,8 +121,8 @@ def test_shares_over_one_are_refused():
 
 
 def test_winner_takes_all_pays_the_newest_entry_and_nothing_older():
-    """Horizon's cadence: one round, one winner. The runners-up of a closed round are champions
-    of earlier ones and are not paid again."""
+    """`split = (1.0,)`, the shape Horizon's vault is weighted with: one entry takes the whole
+    share, and older entries are not paid."""
     lane = Lane("horizon", 0.70, ["new", "older", "oldest"], split=(1.0,))
 
     w = weight_vector([lane], {"new": 1, "older": 2, "oldest": 3, "o": 0}, burn_uid=0)
@@ -132,7 +132,7 @@ def test_winner_takes_all_pays_the_newest_entry_and_nothing_older():
 
 def test_a_winner_who_deregistered_burns_the_whole_lane_share():
     """The cliff winner-takes-all has: with one entry there is nobody to fall back to, and the
-    share burns until the next round closes."""
+    share burns while it is not registered."""
     lane = Lane("horizon", 0.70, ["gone", "older"], split=(1.0,))
 
     w = weight_vector([lane], {"older": 2, "o": 0}, burn_uid=0)
@@ -158,13 +158,14 @@ def test_a_split_that_is_not_a_partition_of_the_share_is_refused(bad):
         Lane("vector", 0.30, ["a"], split=bad)
 
 
-def test_both_competitions_commitments_are_read_from_one_storage():
-    """One subnet, one commitment slot per hotkey: the prefix says which competition it entered,
-    so a miner never has to say which netuid they meant."""
+def test_only_vector_commitments_are_submissions():
+    """One subnet, one commitment slot per hotkey: the prefix says which competition it entered.
+    Vector is the only one; a `horizon:` string from the retired model competition is not a
+    submission."""
     vector = commitment.parse(commitment.encode("o/n", SHA, DIGEST))
-    horizon = commitment.parse(f"horizon:o/n@{SHA}")
 
-    assert (vector.lane, horizon.lane) == ("vector", "horizon")
-    assert vector.entry == horizon.entry
-    assert (vector.digest, horizon.digest) == (DIGEST, None)
-    assert commitment.encode("o/n", SHA, lane="horizon") == f"horizon:o/n@{SHA}"
+    assert (vector.lane, vector.entry, vector.digest) == ("vector", f"o/n@{SHA}", DIGEST)
+    with pytest.raises(commitment.CommitmentError, match="no known lane prefix"):
+        commitment.parse(f"horizon:o/n@{SHA}")
+    with pytest.raises(commitment.CommitmentError, match="unknown lane"):
+        commitment.encode("o/n", SHA, lane="horizon")

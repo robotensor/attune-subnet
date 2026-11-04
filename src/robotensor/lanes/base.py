@@ -1,17 +1,16 @@
 """What the validator knows about a competition, whatever its cadence.
 
-Vector duels a challenger against the reigning king; Horizon opens a round, freezes a pool of
-demonstrations, scores every entrant on it and closes. The validator drives both the same way -
-take in what the chain says, do one piece of work, say who should be paid - and knows nothing of
-duels or rounds. Everything that does is behind this shape.
+Vector duels a challenger against the reigning king, but the validator drives it without knowing
+that: take in what the chain says, do one piece of work, say who should be paid. Everything that
+knows what a duel is lives behind this shape, so a competition with another cadence fits it too.
 
 Two rules make that possible:
 
-- **One `step()` is one resumable piece of work**: a whole duel for Vector, one round verb for
-  Horizon. Killed halfway, the next `step()` picks the same work up where the engine left it, so
-  the loop never has to remember what it was doing.
+- **One `step()` is one resumable piece of work**: a whole duel for Vector. Killed halfway, the
+  next `step()` picks the same work up where the engine left it, so the loop never has to remember
+  what it was doing.
 - **A lane never raises its engine's exceptions.** The loop cannot catch what it cannot import,
-  and a validator running one competition does not install the other's engine. A lane catches its
+  and a validator running one competition does not install another's engine. A lane catches its
   own and returns a `Progress` saying what happened. `tests/test_lane.py` holds it to that.
 
 The lane's own subcommands are not here yet: they arrive with the one `attune`
@@ -27,11 +26,11 @@ from typing import Any, Protocol, runtime_checkable
 
 from ..protocol.weights import CHAMPION_SPLIT
 
-#: A step did work that moved the competition on: a duel published, a round verb finished.
+#: A step did work that moved the competition on: a duel published.
 WORKED = "worked"
 #: There was nothing to do. Everything the chain has offered is settled.
 IDLE = "idle"
-#: The work exists but cannot start yet - a seed block that is not final, a window still open.
+#: The work exists but cannot start yet - a seed block that is not final.
 WAITING = "waiting"
 #: The step failed for a reason that is nobody's loss: the entry stays where it was and the next
 #: step tries again. A harness failure is never a result.
@@ -70,7 +69,7 @@ class Award:
 
     `entries` are hotkeys; `None` is an entry that belongs to no miner (the organizer's genesis
     baseline), which is skipped rather than paid. `split` is the knob of `protocol.weights`:
-    40/30/20/10 over four entries is Vector's pool, `(1.0,)` is Horizon's winner-takes-all.
+    40/30/20/10 over four entries is Vector's; `(1.0,)` would be winner-takes-all.
     """
 
     entries: Sequence[str | None] = field(default_factory=list)

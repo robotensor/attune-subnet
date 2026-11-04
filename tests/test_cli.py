@@ -12,20 +12,20 @@ from robotensor.cli import (
 
 
 def test_the_flag_wins_over_the_environment_and_the_config():
-    chosen = competition("vector", {"vector": 1, "horizon": 2}, {COMPETITION_ENV: "horizon"})
+    chosen = competition("vector", {"vector": 1, "other": 2}, {COMPETITION_ENV: "other"})
 
     assert chosen == "vector"
 
 
 def test_the_environment_saves_saying_it_on_every_command():
-    assert competition(None, {"vector": 1, "horizon": 2}, {COMPETITION_ENV: "horizon"}) == "horizon"
+    assert competition(None, {"vector": 1, "other": 2}, {COMPETITION_ENV: "other"}) == "other"
 
 
 def test_the_environment_variable_s_old_name_still_counts():
-    old = {LEGACY_COMPETITION_ENV: "horizon"}
-    assert competition(None, {"vector": 1, "horizon": 2}, old) == "horizon"
-    both = {COMPETITION_ENV: "vector", LEGACY_COMPETITION_ENV: "horizon"}
-    assert competition(None, {"vector": 1, "horizon": 2}, both) == "vector"
+    old = {LEGACY_COMPETITION_ENV: "other"}
+    assert competition(None, {"vector": 1, "other": 2}, old) == "other"
+    both = {COMPETITION_ENV: "vector", LEGACY_COMPETITION_ENV: "other"}
+    assert competition(None, {"vector": 1, "other": 2}, both) == "vector"
 
 
 def test_one_competition_enabled_needs_no_saying():
@@ -34,13 +34,13 @@ def test_one_competition_enabled_needs_no_saying():
 
 def test_two_enabled_and_nothing_said_is_refused_by_name():
     """A miner who meant the other one should not find out from a refused submission."""
-    with pytest.raises(CompetitionError, match="vector, horizon"):
-        competition(None, {"vector": 1, "horizon": 2}, {})
+    with pytest.raises(CompetitionError, match="vector, other"):
+        competition(None, {"vector": 1, "other": 2}, {})
 
 
 def test_a_competition_this_validator_does_not_run_is_refused():
-    with pytest.raises(CompetitionError, match="horizon is not"):
-        competition("horizon", {"vector": 1}, {})
+    with pytest.raises(CompetitionError, match="other is not"):
+        competition("other", {"vector": 1}, {})
 
 
 def test_the_command_routes_both_halves():

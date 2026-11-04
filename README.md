@@ -12,13 +12,20 @@
   <a href="#how-it-works">How it works</a> ·
   <a href="#mining">Mining</a> ·
   <a href="#validating">Validating</a> ·
+  <a href="#horizon">Horizon</a> ·
   <a href="#development">Development</a>
 </p>
 
 ---
 
 **Attune** is a Bittensor subnet for robot foundation models, built by [Robotensor](https://www.robotensor.ai). Miners submit policy weights;
-validators score them in simulation and set weights on chain.
+validators score them in simulation and set weights on chain. The rest of the emission pays the
+people who collect robot data on Attune Horizon: see [Horizon](#horizon).
+
+| Share of miner emission | Goes to |
+|---|---|
+| 30% | **Vector**, the policy competition below |
+| 70% | **Horizon**, Robotensor's data platform: one vault UID, paid out to the people who collect data there |
 
 The first competition is **Vector**: a policy (`vector_v1.1`) is shown one
 demonstration of a task and must complete the same task in a different scene.
@@ -31,7 +38,7 @@ demonstration of a task and must complete the same task in a different scene.
 | **Commitment** | `vector:<owner>/<repo>@<commit>.<digest>` on chain: the revision and the sha256 of `model.safetensors`, in base64url. `attune miner commit` builds it; repo ids can be up to 49 characters long. |
 | **Queue** | The validator queues a commitment as soon as it reads it from the chain, oldest first. **One submission per hotkey**: once a hotkey is queued, its later commitments are refused. |
 | **Scoring** | King of the hill. Each queued submission duels the current king on 240 units (16 tasks × 15), seeded from the finalized block when the duel starts. That block must come after the commitment. The challenger takes the crown when its average success rate beats the king's by 3+ points. |
-| **Rewards** | The lane's share goes to the 4 most recent champions: 40% / 30% / 20% / 10%, newest first. |
+| **Rewards** | The lane's share (30% of miner emission) goes to the 4 most recent champions: 40% / 30% / 20% / 10%, newest first. |
 
 ### Repositories and the kings' weights
 
@@ -159,6 +166,29 @@ repo, the queue waits and the log names the king. To go on, upload those weights
 For rented GPU pods (vast.ai, lium.io), `docker/build.sh` builds an image with all three
 environments, the assets and the checkouts. Run `pod-check --selftest` on a new pod.
 
+## Horizon
+
+70% of the miner emission pays for robot data: robot control in simulation, recordings and the
+other work people do on [Attune Horizon](https://horizon.robotensor.ai), Robotensor's data platform.
+Horizon checks and scores that work in points.
+
+- **On chain**, Horizon is one registered hotkey, the vault, owned by Robotensor. Validators give it
+  70% of their weights. Its hotkey is fixed in code per network (`VAULT_HOTKEYS` in `config.py`),
+  so every validator weights the same one. While it is not registered, its share burns like a
+  deregistered champion's.
+- **Off chain**, Robotensor pays the people who collect data from the vault every week, split by
+  their points, with `transfer_stake`. Nothing in this repository moves funds.
+- **In the open**: every week's points, shares and payouts are on Horizon's
+  [rewards page](https://horizon.robotensor.ai/dashboard).
+
+Validators need nothing more than `attune validator run`: `weights --dry-run` shows the vault's
+part beside Vector's. A test network or a local chain names its vault in the config:
+
+```toml
+[horizon]
+vault_hotkey = "5..."
+```
+
 ## Development
 
 ```bash
@@ -168,7 +198,7 @@ pytest -q -m "not chain and not gpu"
 ```
 
 `scripts/localnet.sh up` and `scripts/localnet_setup.py` run the full loop against a local
-subtensor.
+subtensor, with a stand-in for Horizon's vault registered as a miner.
 
 ### Releasing the miner package
 

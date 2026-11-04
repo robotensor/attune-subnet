@@ -5,11 +5,13 @@
              inside the chain's activity cutoff meanwhile
     intake   read the chain's commitments into the lanes once, and print what changed
     duel     run one Vector duel now: the queue's next, or --challenger repo@sha
-    weights  compute the weight vector and set it (--dry-run prints it)
-    status   where each competition stands
+    weights  compute the weight vector and set it (--dry-run prints it): Vector's champions take
+             its 30%, Horizon's vault 70%, the rest burns
+    status   where each competition stands, and Horizon's vault
 
 The chain is `chain.Chain`, the only bittensor code. What a competition is lives behind
-`lanes.base.Lane`; nothing here knows what a duel or a round is.
+`lanes.base.Lane`; nothing here knows what a duel is. Horizon is no competition: it is one vault
+hotkey, which Robotensor pays the people who collect data on Attune Horizon from, off chain.
 """
 
 from __future__ import annotations
@@ -47,9 +49,17 @@ def compute_weights(cfg: Config, vector: VectorLane, chain: chain_.Chain) -> dic
         raise RuntimeError(
             f"the subnet owner's hotkey {burn} is not registered on netuid {cfg.netuid}"
         )
-    award = vector.award()
-    lanes = [weights_.Lane(vector.name, cfg.vector.share, award.entries, split=award.split)]
-    return weights_.weight_vector(lanes, uids, uids[burn])
+    return weights_.weight_vector(lanes(cfg, vector.award()), uids, uids[burn])
+
+
+def lanes(cfg: Config, award: Any) -> list[weights_.Lane]:
+    """Vector's champions, and Horizon's vault, which takes its whole share: an unset or
+    unregistered vault burns it like a deregistered champion."""
+    horizon = cfg.horizon
+    return [
+        weights_.Lane("vector", cfg.vector.share, award.entries, split=award.split),
+        weights_.Lane("horizon", horizon.share, [horizon.vault_hotkey or None], split=(1.0,)),
+    ]
 
 
 def set_weights(
@@ -208,7 +218,11 @@ def cmd_status(args: argparse.Namespace, cfg: Config) -> int:
     from .worker import build
 
     state = State(cfg.state)
-    shown = {name: build(cfg, name, state).snapshot() for name in sorted(cfg.lanes)}
+    shown: dict[str, Any] = {name: build(cfg, name, state).snapshot() for name in sorted(cfg.lanes)}
+    shown["horizon"] = {
+        "share": cfg.horizon.share,
+        "vault_hotkey": cfg.horizon.vault_hotkey or None,
+    }
     print(json.dumps(shown, indent=1, default=str))
     return 0
 

@@ -162,15 +162,17 @@ def test_validator_user_is_gone(tmp_path):
         load(write(tmp_path, text))
 
 
-def test_horizon_keeps_its_rounds_in_the_data_directory(tmp_path):
-    cfg = load(write(tmp_path, GOOD + "\n[horizon]\ngenesis_block = 5\nwindow_blocks = 100\n"))
-    assert cfg.horizon.rounds == tmp_path / "var" / "horizon" / "rounds"
-    assert (cfg.horizon.genesis_block, cfg.horizon.window_blocks, cfg.horizon.share) == (
-        5,
-        100,
-        0.0,
-    )
-    assert cfg.shares == {"vector": 0.30, "horizon": 0.0}
+def test_horizon_is_the_vault_and_vector_the_only_competition(tmp_path):
+    cfg = load(write(tmp_path, GOOD))
+    assert cfg.shares == {"vector": 0.30}
+    assert (cfg.horizon.share, cfg.horizon.vault_hotkey) == (0.70, "")
+
+
+def test_the_old_horizon_competitions_keys_are_refused_with_why(tmp_path):
+    """`[horizon]` once ran a model competition; a config still naming its keys is told that it
+    is gone rather than which keys are unknown."""
+    with pytest.raises(ConfigError, match="model competition"):
+        load(write(tmp_path, GOOD + "\n[horizon]\ngenesis_block = 5\nwindow_blocks = 100\n"))
 
 
 def test_the_repositorys_configs_load():

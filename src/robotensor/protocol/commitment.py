@@ -1,7 +1,6 @@
 """What a miner writes on chain: one short string naming its submission.
 
     vector:<owner>/<name>@<commit>.<digest>
-    horizon:<owner>/<name>@<40-hex commit>
 
 A Vector commitment names its weights as well as where they are: `<commit>` is the repository
 revision's 20 bytes and `<digest>` the sha256 of its `model.safetensors`, both in unpadded base64url
@@ -9,11 +8,12 @@ revision's 20 bytes and `<digest>` the sha256 of its `model.safetensors`, both i
 a commitment whose digest is not what the Hub says that file at that revision hashes to, so a
 miner's commitment pins the exact weights it duels with from the block it was made at.
 
-The first word names the competition the submission enters, so one subnet reads both competitions'
-commitments from the same storage and a miner never has to say which netuid slot they meant. The
-string is stored as a raw commitment, which holds at most `MAX_BYTES` bytes, so a repository id can
-be at most about 80 characters. The revision is always a full commit sha: a branch would let a
-miner change what was committed after its block, and the block is what orders the queue.
+The first word names the competition the submission enters, so a competition added later reads
+its commitments from the same storage and a miner never has to say which netuid slot they meant.
+Anything else on chain - a string with another prefix, or none - is not a submission and is
+ignored. The string is stored as a raw commitment, which holds at most `MAX_BYTES` bytes. The
+revision is always a full commit sha: a branch would let a miner change what was committed after
+its block, and the block is what orders the queue.
 """
 
 from __future__ import annotations
@@ -25,13 +25,9 @@ from dataclasses import dataclass
 
 #: A raw commitment's limit on chain (`Raw` data, as `Subtensor.set_commitment` writes it).
 MAX_BYTES = 128
-#: Competition 1, action-grounded in-context learning: the only one live at launch.
+#: The competition: action-grounded in-context learning.
 VECTOR = "vector"
-#: Competition 2, video-prompted world-action learning. Its commitments are read and taken in;
-#: what they enter does not pay yet (`config.SHARES`), and the round that scores them is
-#: staged in `lanes/horizon.py`.
-HORIZON = "horizon"
-LANES = (VECTOR, HORIZON)
+LANES = (VECTOR,)
 
 REPO_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*")
 SHA_RE = re.compile(r"[0-9a-f]{40}")

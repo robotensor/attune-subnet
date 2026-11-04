@@ -1,9 +1,10 @@
 """How the validator's weight vector follows from the lanes' champions.
 
 The subnet spec: Competition 1 (Vector) takes a share of miner emissions (30%), and within it the
-four most recent champion models are paid 40%, 30%, 20% and 10%, newest first. Until the other
-lanes launch, what no lane claims goes to the burn UID (configurable: `lanes` and `burn` in the
-validator's config).
+four most recent champion models are paid 40%, 30%, 20% and 10%, newest first. Horizon,
+Robotensor's data platform, takes the other 70%: one entry, its vault's hotkey, with
+`split = (1.0,)`. Robotensor pays the people who collect data on Horizon from the vault, off chain.
+What no lane claims goes to the burn UID, the subnet owner's hotkey.
 
 Rules, all keyed by hotkey and mapped to UIDs only at the end, because UIDs are recycled:
 
@@ -18,10 +19,9 @@ Rules, all keyed by hotkey and mapped to UIDs only at the end, because UIDs are 
   next older champion takes its place. A miner's repository going away strikes nobody off now.
 - Everything not given to a champion goes to the burn UID. Weights sum to 1.
 
-Two cadences, one formula. `split = (0.4, 0.3, 0.2, 0.1)` is Vector's pool. `split = (1.0,)` is
-Horizon's round: the winner takes all, and if that winner deregisters the lane's whole share burns
-until the next round closes - a real cliff, and the reason the split is a knob rather than a
-constant.
+Two shapes, one formula. `split = (0.4, 0.3, 0.2, 0.1)` is Vector's champions. `split = (1.0,)` is
+Horizon's vault: one hotkey takes the whole share, and while it is not registered the whole share
+burns.
 """
 
 from __future__ import annotations

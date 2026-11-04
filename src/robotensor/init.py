@@ -24,6 +24,11 @@ netuid = {netuid}
 # The wallet this validator sets weights with. `btcli wallet list` shows what you have.
 wallet = {{ name = "{wallet_name}", hotkey = "{wallet_hotkey}" }}
 
+# Horizon's vault takes 70% of the weights. A network whose vault is fixed in code
+# (`VAULT_HOTKEYS`) needs nothing here; elsewhere name the vault's hotkey (left out, it burns).
+# [horizon]
+# vault_hotkey = "5..."
+
 [vector]
 # The two environments a duel needs, and the RoboTwin-Vector checkout the simulator runs from; see
 # the README.

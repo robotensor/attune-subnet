@@ -4,8 +4,10 @@
 
 Throwaway keys only, under `--wallets` (git-ignored): the owner's coldkey is the localnet's funded
 dev account `//Alice`, which also validates (a subnet owner needs no validator permit); `miner1` and
-`miner2` get fresh coldkeys funded from it. Prints the netuid and writes it into
-config/localnet.toml. Idempotent: an existing subnet owned by the owner is reused.
+`miner2` get fresh coldkeys funded from it. `vault` stands in for Horizon's vault: its `default`
+hotkey is registered like a miner, for `[horizon] vault_hotkey`. Prints the netuid and the vault
+hotkey, and writes the netuid into config/localnet.toml. Idempotent: an existing subnet owned by the
+owner is reused.
 """
 
 from __future__ import annotations
@@ -49,8 +51,9 @@ def main() -> int:
     sub = bt.Subtensor(network=args.network)
     owner = wallet(path, "owner", "//Alice")
     miners = [wallet(path, name) for name in ("miner1", "miner2")]
+    vault = wallet(path, "vault")
 
-    for m in miners:
+    for m in [*miners, vault]:
         if sub.get_balance(m.coldkeypub.ss58_address).tao < 100:
             ok(
                 sub.transfer(owner, m.coldkeypub.ss58_address, bt.Balance.from_tao(1000)),
@@ -73,14 +76,15 @@ def main() -> int:
             f"start_call: {getattr(response, 'success', response)} {getattr(response, 'message', '')}"
         )
 
-    for m in miners:
+    for m in [*miners, vault]:
         if not sub.is_hotkey_registered(m.hotkey.ss58_address, netuid):
             ok(sub.burned_register(m, netuid), f"burned_register {m.name}")
     uids = {
         w.name: sub.get_uid_for_hotkey_on_subnet(w.hotkey.ss58_address, netuid)
-        for w in [owner, *miners]
+        for w in [owner, *miners, vault]
     }
     print(f"netuid {netuid}; uids {uids}")
+    print(f"vault hotkey (for [horizon] vault_hotkey) {vault.hotkey.ss58_address}")
     config = Path(args.config)
     text = config.read_text(encoding="utf-8")
     config.write_text(re.sub(r"(?m)^netuid = \d+", f"netuid = {netuid}", text), encoding="utf-8")

@@ -1,15 +1,15 @@
 """The Hugging Face Hub, as the subnet sees a submission there.
 
-Intake decides from the Hub's metadata alone and never downloads a model. Two competitions ask
+Intake decides from the Hub's metadata alone and never downloads a model. Competitions may ask
 different things of a repository, so what each may hold and what makes two submissions the same
 model is a `Shape` the lane brings.
 
 **Why metadata is enough.** Git LFS stores a file under its own sha256, and the Hub reports it, so
 the validator can tell a copy from an original without moving a byte. Vector's submission is one
 `model.safetensors` and its content key is that file's sha256 - the value this subnet has always
-used. Horizon's is tens of gigabytes of shards beside a few kilobyte files; its key is the digest
-of the listing `sha256sum` would print for the files it covers, which is what its runtime computes
-on disk. The kilobyte files are not in LFS, so those - and only those - are fetched.
+used. A submission of many files - gigabytes of shards beside a few kilobyte files - is keyed on
+the digest of the listing `sha256sum` would print for the files it covers, which a runtime can
+compute on disk. The kilobyte files are not in LFS, so those - and only those - are fetched.
 
 A shard that was pushed as a plain git blob rather than through LFS has no sha256 on the Hub and
 is refused, with the remedy: track `*.safetensors` in `.gitattributes`.
@@ -88,8 +88,8 @@ class Shape:
 
     - `"file"`: the one hashed file's own sha256. Vector's, and the value it has always had.
     - `"listing"`: `sha256` of `"<sha256>  <name>\\n"` for each hashed file, ordered by the bytes
-      of its path - the digest `sha256sum <files> | sha256sum` gives, which is what Horizon's
-      runtime computes over the same files on disk.
+      of its path - the digest `sha256sum <files> | sha256sum` gives over the same files on
+      disk.
     """
 
     #: Files a repository may hold; one matching none of these is refused.

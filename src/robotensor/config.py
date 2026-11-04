@@ -17,11 +17,12 @@
     start_block = 4000000                # commitments made before this block are ignored; a
                                          # local chain may leave it out (0)
 
-    [horizon]                            # runs Horizon; see HorizonConfig
+    [horizon]                            # Horizon's vault, where the network does not pin one in
+    vault_hotkey = "5F..."               # code (`VAULT_HOTKEYS`)
 
-Only what differs between hosts is here. Everything else is fixed in code: each competition's share
-of the emission, the data directory (`var/<config name>/` beside `config/`, or `var/` beside a
-config elsewhere), the weights interval and Horizon's private window (per network) and the device.
+Only what differs between hosts is here. Everything else is fixed in code: each share of the
+emission, the data directory (`var/<config name>/` beside `config/`, or `var/` beside a config
+elsewhere), the weights interval (per network) and the device.
 A key this build does not know is refused, with its name.
 
 Secrets are not in the TOML: a `.env` beside it (`KEY=VALUE` lines, `#` comments) is read by
@@ -40,8 +41,18 @@ from typing import Any
 from .init import ENV_FILE
 
 #: Each competition's share of the miner emission. What the competitions run here do not claim
-#: burns (to the subnet owner's hotkey). Horizon pays nothing until it opens.
-SHARES = {"vector": 0.30, "horizon": 0.0}
+#: burns (to the subnet owner's hotkey).
+SHARES = {"vector": 0.30}
+
+#: Horizon's share of the miner emission: one vault UID, owned by Robotensor, which pays the people
+#: who collect robot data on Attune Horizon, Robotensor's data platform. The payouts are made from
+#: the vault off chain; validators only weight it. With Vector's 30% it is the whole of it.
+HORIZON_SHARE = 0.70
+
+#: The vault hotkey each public network weights, fixed here so that every validator agrees on it.
+#: A network without one takes `[horizon] vault_hotkey` from the config; with neither, or while
+#: the vault is not registered, Horizon's share burns.
+VAULT_HOTKEYS: dict[str, str] = {}
 
 
 class ConfigError(ValueError):
@@ -92,36 +103,18 @@ VECTOR_KEYS = (
 
 
 @dataclass(frozen=True)
-class HorizonConfig(LaneConfig):
-    """Horizon. Its schedule is the chain's: `genesis_block` and `window_blocks` are all
-    two validators need to agree on which round is open (`protocol.schedule`)."""
+class HorizonConfig:
+    """Horizon's vault, as the validator weights it: one hotkey takes the whole share."""
 
-    genesis_block: int = 0
-    window_blocks: int = 50400  # a week of 12-second blocks
-    #: The engine's own configuration, which says what a round evaluates.
-    competition: Path | None = None
-    #: An interpreter for the engine, when it cannot share this one.
-    engine_python: str = ""
-    #: The interpreter of the model runtime environment, which serves a submission.
-    runtime_python: str = ""
-    #: The unprivileged user a served model runs as; a lane that pays must name one.
-    serve_as: str = ""
-    mirror: str = ""
-    #: The cards this competition may use, when the box is shared with the other one.
-    devices: tuple[int, ...] = ()
-    #: Which of the engine's profiles a round runs; empty for its own default.
-    profile: str = ""
-    #: Rehearse: score beside the real scores and publish nothing at close.
-    dry_run: bool = False
-    store: Path = Path()
-    rounds: Path = Path()
-    models: Path = Path()
-    private_window_blocks: int = 300
-    #: A submission's cap: shards, statistics and the knobs file together.
-    max_repo_bytes: int = 50 << 30
+    share: float = HORIZON_SHARE
+    #: The vault's hotkey; empty while the network has none, and its share then burns.
+    vault_hotkey: str = ""
 
 
-HORIZON_KEYS = (
+HORIZON_KEYS = ("vault_hotkey",)
+#: What `[horizon]` held when Horizon was a model competition. A config still naming them is told
+#: so, rather than refused key by key.
+RETIRED_HORIZON_KEYS = (
     "genesis_block", "window_blocks", "competition", "engine_python", "runtime_python", "serve_as",
     "mirror", "devices", "profile", "dry_run",
 )  # fmt: skip
@@ -140,6 +133,7 @@ class Config:
     path: Path
     #: What relative paths in the file hang from.
     root: Path
+    horizon: HorizonConfig = HorizonConfig()
 
     @property
     def state(self) -> Path:
@@ -153,12 +147,6 @@ class Config:
     @property
     def shares(self) -> dict[str, float]:
         return {name: lane.share for name, lane in self.lanes.items()}
-
-    @property
-    def horizon(self) -> HorizonConfig:
-        lane = self.lanes["horizon"]
-        assert isinstance(lane, HorizonConfig)
-        return lane
 
     @property
     def vector(self) -> VectorConfig:
@@ -229,40 +217,36 @@ def _vector(
     )
 
 
-def _horizon(
-    table: dict[str, Any], root: Path, data: Path, network: str, path: Path
-) -> HorizonConfig:
-    _refuse_unknown("[horizon]", table, HORIZON_KEYS, path)
-    share = SHARES["horizon"]
-    serve_as = str(table.get("serve_as", ""))
-    if share > 0 and not serve_as:
+def _ss58(value: Any) -> bool:
+    """Whether `value` looks like an SS58 address (the chain checks the rest)."""
+    text = str(value)
+    alphabet = set("123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz")
+    return 46 <= len(text) <= 48 and set(text) <= alphabet
+
+
+def _horizon(table: dict[str, Any], network: str, path: Path) -> HorizonConfig:
+    retired = sorted(set(table) & set(RETIRED_HORIZON_KEYS)) if isinstance(table, dict) else []
+    if retired:
         raise ConfigError(
-            f"{path}: Horizon pays {share:.0%} of the emission and [horizon] names no serve_as. A "
-            "model served as the user running the validator can read the answer key of the episode "
-            "it is being scored on; name an unprivileged user."
+            f"{path}: [horizon] names {', '.join(retired)}, which were the Horizon model "
+            "competition's. It is gone: Horizon is Robotensor's data platform, and [horizon] takes "
+            "only vault_hotkey."
         )
-    return HorizonConfig(
-        name="horizon",
-        share=share,
-        genesis_block=int(table.get("genesis_block", 0)),
-        window_blocks=int(table.get("window_blocks", 50400)),
-        competition=_path(root, table["competition"]) if table.get("competition") else None,
-        engine_python=os.path.expandvars(str(table.get("engine_python", ""))),
-        runtime_python=os.path.expandvars(str(table.get("runtime_python", ""))),
-        serve_as=serve_as,
-        mirror=str(table.get("mirror", "")),
-        devices=tuple(int(d) for d in (table.get("devices") or ())),
-        profile=str(table.get("profile", "")),
-        dry_run=bool(table.get("dry_run", False)),
-        store=data / "horizon" / "store",
-        rounds=data / "horizon" / "rounds",
-        models=data / "horizon" / "models",
-        private_window_blocks=1200 if local(network) else 300,
-    )
+    _refuse_unknown("[horizon]", table, HORIZON_KEYS, path)
+    pinned = VAULT_HOTKEYS.get(network, "")
+    named = str(table.get("vault_hotkey", ""))
+    if named and not _ss58(named):
+        raise ConfigError(f"{path}: [horizon] vault_hotkey is not an SS58 address: {named}")
+    if pinned and named and named != pinned:
+        raise ConfigError(
+            f"{path}: [horizon] vault_hotkey is {named}, but {network}'s vault is {pinned}; "
+            "every validator weights the same one. Leave it out."
+        )
+    return HorizonConfig(share=HORIZON_SHARE, vault_hotkey=pinned or named)
 
 
 #: The competitions this build runs, and how each reads its table.
-LANES = {"vector": _vector, "horizon": _horizon}
+LANES = {"vector": _vector}
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -294,7 +278,7 @@ def load(path: str | os.PathLike[str]) -> Config:
     for key, value in read_env(path.parent / ENV_FILE).items():
         os.environ.setdefault(key, value)
     doc = tomllib.loads(path.read_text(encoding="utf-8"))
-    _refuse_unknown("the file", doc, ("network", "netuid", "wallet", *LANES), path)
+    _refuse_unknown("the file", doc, ("network", "netuid", "wallet", "horizon", *LANES), path)
     for key in ("network", "netuid"):
         if key not in doc:
             raise ConfigError(f"{path}: needs {key}")
@@ -310,7 +294,8 @@ def load(path: str | os.PathLike[str]) -> Config:
         if name in doc
     }
     if not lanes:
-        raise ConfigError(f"{path}: no [vector] or [horizon] table; a validator runs at least one")
+        raise ConfigError(f"{path}: no [vector] table; a validator runs at least one competition")
+    horizon = _horizon(doc.get("horizon", {}), network, path)
     return Config(
         network=network,
         netuid=int(doc["netuid"]),
@@ -321,4 +306,5 @@ def load(path: str | os.PathLike[str]) -> Config:
         lanes=lanes,
         path=path,
         root=root,
+        horizon=horizon,
     )

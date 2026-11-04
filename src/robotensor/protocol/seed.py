@@ -13,10 +13,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-#: Blocks behind the head that Horizon's schedule waits before it reads a seed block
-#: (`protocol.schedule`); a Vector duel reads the finalized head instead.
-FINALITY = 3
-
 
 @dataclass(frozen=True)
 class Seed:

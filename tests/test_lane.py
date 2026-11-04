@@ -445,6 +445,52 @@ def test_a_queued_commitment_is_the_hotkeys_one_shot_whatever_its_repository_hol
     assert later.status == "refused"
 
 
+def test_an_entry_that_keeps_failing_goes_behind_the_rest_and_keeps_its_submission(
+    lane, hub_of, monkeypatch
+):
+    """Whatever the cause: one entry must not hold the queue, and a harness down loses nobody's."""
+    from vector_orchestrator.duel.orchestrate import DuelFailed
+
+    from robotensor.lanes import vector
+    from robotensor.lanes.base import FAILED, WORKED
+
+    hub_of({f"m/bad@{A}": {"model.safetensors": "w1"}, f"m/two@{B}": {"model.safetensors": "w2"}})
+    lane.intake([c("hk1", "m/bad", A, 10), c("hk2", "m/two", B, 20)], 30)
+    asked = []
+    good = genesis_run(asked)
+
+    def run(req):
+        if req.challenger.repo == "m/bad":
+            raise DuelFailed("the check crashed")
+        return good(req)
+
+    monkeypatch.setattr(lane.engine, "run", run)
+    for _ in range(vector.DUEL_TRIES):
+        assert lane.step(chain=FakeChain()).outcome == FAILED
+    assert [e.repo for e in lane.queue()] == ["m/two", "m/bad"]
+    assert lane.step(chain=FakeChain()).outcome == WORKED
+    assert [r.challenger.repo for r in asked] == ["m/two"]
+    assert statuses(lane) == {"hk1": "queued", "hk2": "crowned"}
+
+
+def test_an_entry_that_sets_off_anything_unexpected_is_held_the_same_way(lane, hub_of, monkeypatch):
+    from robotensor.lanes import vector
+    from robotensor.lanes.base import FAILED
+
+    hub_of({f"m/bad@{A}": {"model.safetensors": "w1"}, f"m/two@{B}": {"model.safetensors": "w2"}})
+    lane.intake([c("hk1", "m/bad", A, 10), c("hk2", "m/two", B, 20)], 30)
+
+    def run(req):
+        raise TypeError("unhashable type: list")
+
+    monkeypatch.setattr(lane.engine, "run", run)
+    progress = lane.step(chain=FakeChain())
+    assert progress.outcome == FAILED and "unhashable" in progress.detail
+    for _ in range(vector.DUEL_TRIES - 1):
+        lane.step(chain=FakeChain())
+    assert lane.queue()[0].repo == "m/two"
+
+
 def past_the_tries(lane, monkeypatch):
     """Steps, `HUB_GAP_S` apart, until the entry at the head has had all its tries."""
     from robotensor.lanes import vector

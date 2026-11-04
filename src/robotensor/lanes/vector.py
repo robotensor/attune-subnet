@@ -96,6 +96,10 @@ RETIRED = "retired"
 #: `missing`, and the least time between two of those tries (a step that comes sooner waits).
 HUB_TRIES = 3
 HUB_GAP_S = 90.0
+#: How many times running an entry may fail before the entries behind it go first. It keeps its
+#: place in the queue's tail and its submission: a harness down fails them all, and that is nobody's
+#: loss; but whatever makes one entry fail for ever must not hold the others up behind it.
+DUEL_TRIES = 3
 #: `champions.json`'s layout.
 CHAMPIONS_SCHEMA = 1
 
@@ -331,17 +335,18 @@ class VectorLane:
         return None
 
     def queue(self) -> list[Entry]:
-        """The entries waiting for a duel, oldest commitment first. The one being duelled is still
-        queued until its duel ends."""
+        """The entries waiting for a duel, oldest commitment first, those that failed `DUEL_TRIES`
+        times behind the rest. The one being duelled is still queued until its duel ends."""
         self.engine  # noqa: B018 - built first, for the state it takes up
         with self._lock:
             lane = self.state.lane(LANE)
             waiting = [
-                self._entry(key, record)
+                (int(record.get("duel_failures", 0)) >= DUEL_TRIES, self._entry(key, record))
                 for key, record in lane["entries"].items()
                 if record["status"] == QUEUED
             ]
-        return sorted(waiting, key=lambda e: (e.commit_block, e.hotkey))
+        waiting.sort(key=lambda w: (w[0], w[1].commit_block, w[1].hotkey))
+        return [entry for _, entry in waiting]
 
     def refresh(self, chain: Any) -> list[Entry]:
         """Intake and the queue republished: what the worker runs beside a duel, so a commitment
@@ -584,7 +589,12 @@ class VectorLane:
                 return Progress(LANE, WAITING, f"the crown moved, duelling again: {exc}")
             except DuelFailed as exc:
                 log.error("duel of %s failed (it stays queued): %s", entry.entry, exc)
+                self._count_failure(entry)
                 return Progress(LANE, FAILED, str(exc))
+            except Exception as exc:  # noqa: BLE001 - nothing one entry sets off may hold the queue
+                log.exception("duel of %s raised (it stays queued)", entry.entry)
+                self._count_failure(entry)
+                return Progress(LANE, FAILED, f"{entry.entry}: {type(exc).__name__}: {exc}")
             if result.get("status") == "waiting":
                 return Progress(LANE, WAITING, f"{entry.entry}: {result.get('reason')}")
             if result.get("status") == "skipped":
@@ -602,6 +612,13 @@ class VectorLane:
             self.publish_champions()
             return Progress(LANE, WORKED, detail, record)
         return Progress(LANE, IDLE, "; ".join(passed))
+
+    def _count_failure(self, entry: Entry) -> None:
+        with self._lock:
+            record = self.state.lane(LANE)["entries"].get(entry.key)
+            if record is not None:
+                record["duel_failures"] = int(record.get("duel_failures", 0)) + 1
+                self.state.save()
 
     def publish_queue(self, queue: list[Entry]) -> None:
         """The waiting entries into the store's `queue.json`, as the dashboard shows them, and the

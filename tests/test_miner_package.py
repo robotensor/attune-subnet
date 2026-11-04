@@ -76,6 +76,14 @@ def test_the_package_holds_the_miner_and_runs_on_its_own(tmp_path):
     helped = subprocess.run([sys.executable, "-S", "-m", "robotensor.miner_cli", "--help"], **run)
     assert helped.returncode == 0 and "{init,miner}" in helped.stdout
 
+    work = tmp_path / "work"
+    inited = subprocess.run(
+        [sys.executable, "-S", "-m", "robotensor.miner_cli", "init", "--role", "miner", str(work)],
+        **run,
+    )
+    assert inited.returncode == 0, inited.stderr
+    assert (work / "submission").is_dir()
+
     junk = tmp_path / "model.safetensors"
     junk.write_bytes(b"\x08\x00\x00\x00\x00\x00\x00\x00{}      ")
     checked = subprocess.run(

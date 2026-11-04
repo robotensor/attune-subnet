@@ -3,7 +3,7 @@
     attune init [DIR] [--role miner|validator]
     attune --version
     attune status [--competition vector]
-    attune miner     check | upload | commit | submit | status
+    attune miner     check | upload | commit | reveal | submit | status
     attune validator run | intake | duel | weights | status
 
 Which competition a command means is resolved once, in this order: `--competition`, then

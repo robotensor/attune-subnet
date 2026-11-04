@@ -148,14 +148,14 @@ def test_upload_gates_the_repository_and_lets_the_validator_in_before_a_byte_goe
             calls.append(("create", repo, kw.get("private")))
 
         def update_repo_settings(self, repo, **kw):
-            calls.append(("settings", repo, kw.get("gated")))
+            calls.append(("settings", repo, kw.get("gated"), kw.get("private")))
 
         def grant_access(self, repo, user, **kw):
             calls.append(("grant", repo, user))
 
         def list_accepted_access_requests(self, repo, **kw):
             calls.append(("accepted", repo))
-            return [SimpleNamespace(username=hub.VALIDATOR_USER)]
+            return [SimpleNamespace(username=hub.PERMITTED_VALIDATORS[0])]
 
         def create_commit(self, repo, operations, **kw):
             calls.append(("commit", repo, [o.path_in_repo for o in operations]))
@@ -168,9 +168,9 @@ def test_upload_gates_the_repository_and_lets_the_validator_in_before_a_byte_goe
     assert sha == "c" * 40
     assert calls == [
         ("token", "t"),
-        ("create", "me/mine", None),
-        ("settings", "me/mine", "manual"),
-        ("grant", "me/mine", hub.VALIDATOR_USER),
+        ("create", "me/mine", True),
+        ("settings", "me/mine", "manual", True),
+        ("grant", "me/mine", hub.PERMITTED_VALIDATORS[0]),
         ("accepted", "me/mine"),
         ("commit", "me/mine", ["model.safetensors", "README.md"]),
     ]
@@ -226,7 +226,7 @@ def test_a_repository_already_gated_to_the_account_is_not_an_error(monkeypatch, 
     def grant(user):
         raise _http(400)
 
-    commits = _gating_api(monkeypatch, grant=grant, accepted=[hub.VALIDATOR_USER])
+    commits = _gating_api(monkeypatch, grant=grant, accepted=[hub.PERMITTED_VALIDATORS[0]])
     (tmp_path / "model.safetensors").write_bytes(b"w")
     assert hub.upload_weights("me/mine", str(tmp_path / "model.safetensors")) == "c" * 40
     assert commits == [["model.safetensors"]]
@@ -271,3 +271,24 @@ def test_every_account_given_is_let_in(monkeypatch, tmp_path):
     (tmp_path / "model.safetensors").write_bytes(b"w")
     hub.upload_weights("me/mine", str(tmp_path / "model.safetensors"), gate_to=["a", "b"])
     assert granted == ["a", "b"] and commits == [["model.safetensors"]]
+
+
+def test_reveal_takes_the_repository_out_of_private_and_nothing_else(monkeypatch):
+    import huggingface_hub
+
+    from robotensor import hub
+
+    calls = []
+
+    class Api:
+        def __init__(self, token=None):
+            pass
+
+        def update_repo_settings(self, repo, **kw):
+            calls.append((kw.get("private"), kw.get("gated")))
+
+    monkeypatch.setattr(huggingface_hub, "HfApi", Api)
+    hub.reveal("me/mine")
+    assert calls == [(False, None)]
+
+

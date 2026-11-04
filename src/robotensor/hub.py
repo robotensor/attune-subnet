@@ -25,11 +25,20 @@ from pathlib import Path
 from typing import Any
 
 WEIGHTS_FILE = "model.safetensors"
-#: The Hub account the validators download with. A miner's repository is gated, with access
-#: granted to this account alone, so that nobody else can take the weights before they are crowned.
-VALIDATOR_USER = "angelecho"
+#: The Hub accounts allowed to validate. A miner's repository is gated, with access granted to these
+#: accounts alone, so that nobody else can take the weights before they are crowned; a validator
+#: whose HF_TOKEN belongs to any other account does not start.
+PERMITTED_VALIDATORS = ("angelecho",)
 #: A hashed file the Hub cannot give a sha256 for is fetched when it is no larger than this.
 FETCH_MAX_BYTES = 1 << 20
+
+
+def reveal(repo: str, *, token: str | None = None) -> None:
+    """The repository out of private, as `upload_weights` left it otherwise (gated, with its
+    accounts let in): for once its commitment is on chain. Raises what the Hub raises."""
+    from huggingface_hub import HfApi
+
+    HfApi(token=token or None).update_repo_settings(repo, private=False, repo_type="model")
 
 
 def sha256_of(path: str | Path) -> str:
@@ -290,39 +299,38 @@ def upload_weights(
     weights: str,
     *,
     token: str | None = None,
-    gate_to: str | Sequence[str] | None = VALIDATOR_USER,
+    gate_to: Sequence[str] = PERMITTED_VALIDATORS,
     readme: str | None = None,
     message: str = "Upload model.safetensors",
 ) -> str:
     """Upload `weights` as the repository's `model.safetensors` (and a README if given), creating
-    the repository if needed; the commit sha of the upload. With `gate_to` (one account or
-    several), the repository is gated (manual approval) and each account let in before a byte is
-    uploaded, so the weights are never open to anyone else; the Hub's list of accepted accounts
-    is read back, and `NotLetIn` raised - nothing uploaded - when one is not on it. None leaves
-    the repository as it is."""
+    the repository if needed; the commit sha of the upload. The repository is private from before
+    a byte goes up and stays so until `reveal`: a gated repository still shows anyone its commit
+    and the weights' sha256, which is all a commitment says, so nobody may see them until the
+    chain says they are the miner's. It is also gated (manual approval) with each account of
+    `gate_to` let in; the Hub's list of accepted accounts is read back, and `NotLetIn` raised -
+    nothing uploaded - when one is not on it."""
     from huggingface_hub import CommitOperationAdd, HfApi
     from huggingface_hub.errors import HfHubHTTPError
 
     api = HfApi(token=token or None)
-    api.create_repo(repo, repo_type="model", exist_ok=True)
-    users = [gate_to] if isinstance(gate_to, str) else list(gate_to or ())
-    if users:
-        api.update_repo_settings(repo, gated="manual", repo_type="model")
-        for user in users:
-            try:
-                api.grant_access(repo, user, repo_type="model")
-            except HfHubHTTPError as exc:
-                # 400: already let in, which the read-back below confirms. Anything else is the
-                # Hub refusing (a token that may not grant), and the upload must not go on.
-                if getattr(getattr(exc, "response", None), "status_code", None) != 400:
-                    raise
-        accepted = {
-            str(getattr(r, "username", ""))
-            for r in api.list_accepted_access_requests(repo, repo_type="model")
-        }
-        for user in users:
-            if user not in accepted:
-                raise NotLetIn(f"{repo}: {user} is not let in (the Hub lists {sorted(accepted)})")
+    api.create_repo(repo, repo_type="model", private=True, exist_ok=True)
+    api.update_repo_settings(repo, private=True, gated="manual", repo_type="model")
+    for user in gate_to:
+        try:
+            api.grant_access(repo, user, repo_type="model")
+        except HfHubHTTPError as exc:
+            # 400: already let in, which the read-back below confirms. Anything else is the Hub
+            # refusing (a token that may not grant), and the upload must not go on.
+            if getattr(getattr(exc, "response", None), "status_code", None) != 400:
+                raise
+    accepted = {
+        str(getattr(r, "username", ""))
+        for r in api.list_accepted_access_requests(repo, repo_type="model")
+    }
+    for user in gate_to:
+        if user not in accepted:
+            raise NotLetIn(f"{repo}: {user} is not let in (the Hub lists {sorted(accepted)})")
     operations = [CommitOperationAdd(path_in_repo=WEIGHTS_FILE, path_or_fileobj=weights)]
     if readme is not None:
         operations.append(

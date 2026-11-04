@@ -2,7 +2,7 @@
 
     attune --version
     attune init [DIR]
-    attune miner check | upload | commit | submit | status
+    attune miner check | upload | commit | reveal | submit | status
 
 The same `init` and `miner` commands as the validator's install, which has the validator's
 besides. `--role miner` is accepted, so a command written for either one runs here.

@@ -110,27 +110,47 @@ def test_submit_is_one_command_gated_to_the_validator():
         ]
     )
 
-    assert args.command == "submit" and args.validator_user is None and not args.no_gate
-    from robotensor import miner
-
-    assert miner.gate_to(args) == ["angelecho"]
+    assert args.command == "submit"
 
 
-def test_more_validator_accounts_are_let_in_when_given_and_no_gate_says_so(capsys):
+def test_a_miner_cannot_choose_who_is_let_in():
+    """The permitted list is all there is: no flag adds an account or leaves the gate off."""
     import argparse
 
     from robotensor import miner
 
     parser = argparse.ArgumentParser()
     miner.add_subcommands(parser.add_subparsers(dest="command"))
-    args = parser.parse_args(
-        ["upload", "--dir", "s/", "--repo", "me/mine", "--validator-user", "a", "--validator-user", "b"]
-    )  # fmt: skip
-    assert miner.gate_to(args) == ["a", "b"]
+    for flags in (["--validator-user", "a"], ["--no-gate"]):
+        with pytest.raises(SystemExit):
+            parser.parse_args(["upload", "--dir", "s/", "--repo", "me/mine", *flags])
 
-    args = parser.parse_args(["upload", "--dir", "s/", "--repo", "me/mine", "--no-gate"])
-    assert miner.gate_to(args) == []
-    assert "open" in capsys.readouterr().err
+
+def test_a_commit_that_fails_says_it_may_have_landed_and_what_to_run(monkeypatch, capsys):
+    from argparse import Namespace
+    from types import SimpleNamespace
+
+    from robotensor import chain, miner
+
+    class Chain:
+        def __init__(self, network, netuid):
+            pass
+
+        def commit(self, wallet, data):
+            raise TimeoutError("the socket went")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(chain, "Chain", Chain)
+    wallet = SimpleNamespace(hotkey=SimpleNamespace(ss58_address="hk"))
+    monkeypatch.setattr(chain, "wallet", lambda *a: wallet)
+    args = Namespace(
+        repo="me/mine", wallet_name="w", wallet_hotkey="h", wallet_path=None, network="t", netuid=1
+    )
+    with pytest.raises(TimeoutError):
+        miner._commit_on_chain(args, "data")
+    assert "attune miner reveal --repo me/mine" in capsys.readouterr().err
 
 
 def test_status_reads_the_commitment_back_from_the_hub(monkeypatch, capsys):
@@ -176,3 +196,120 @@ def test_status_reads_the_commitment_back_from_the_hub(monkeypatch, capsys):
     (entry,) = json.loads(capsys.readouterr().out)
     assert "problem" not in entry, entry["problem"]
     assert entry["digest_matches"] and entry["weights_sha256"] == weights
+
+
+# -- private until the chain has the commitment ----------------------------------------------------
+
+
+def _committing(monkeypatch, order):
+    from types import SimpleNamespace
+
+    from robotensor import chain, hub
+
+    class Chain:
+        def __init__(self, *a):
+            pass
+
+        def commit(self, wallet, data):
+            order.append("commit")
+
+        def block(self):
+            return 5
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(chain, "Chain", Chain)
+    monkeypatch.setattr(
+        chain, "wallet", lambda *a: SimpleNamespace(hotkey=SimpleNamespace(ss58_address="hk"))
+    )
+    monkeypatch.setattr(hub, "reveal", lambda repo, token=None: order.append(("reveal", repo)))
+
+
+def _commit_args(parser_args=()):
+    import argparse
+
+    from robotensor import miner
+
+    parser = argparse.ArgumentParser()
+    miner.add_subcommands(parser.add_subparsers(dest="command"))
+    return parser.parse_args(
+        ["commit", "--repo", "me/mine", "--revision", "a" * 40, "--digest", "b" * 64, "--netuid", "1",
+         "--wallet.name", "w", "--wallet.hotkey", "h", *parser_args]
+    )  # fmt: skip
+
+
+def test_commit_reveals_the_repository_only_after_the_chain_has_it(monkeypatch, capsys):
+    import json
+
+    from robotensor import miner
+
+    order = []
+    _committing(monkeypatch, order)
+    assert miner.cmd_commit(_commit_args()) == 0
+    assert order == ["commit", ("reveal", "me/mine")]
+    assert json.loads(capsys.readouterr().out)["revealed"] is True
+
+
+def test_a_commit_that_failed_reveals_nothing(monkeypatch):
+    from robotensor import chain, miner
+
+    order = []
+    _committing(monkeypatch, order)
+
+    class Refused(chain.Chain):
+        def commit(self, wallet, data):
+            raise RuntimeError("no")
+
+    monkeypatch.setattr(chain, "Chain", Refused)
+    with pytest.raises(RuntimeError):
+        miner.cmd_commit(_commit_args())
+    assert order == []
+
+
+def test_a_reveal_that_keeps_failing_is_said_with_what_to_run(monkeypatch, capsys):
+    import json
+
+    from robotensor import hub, miner
+
+    tries = []
+
+    def refused(repo, token=None):
+        tries.append(repo)
+        raise OSError("no network")
+
+    _committing(monkeypatch, [])
+    monkeypatch.setattr(hub, "reveal", refused)
+    monkeypatch.setattr(miner, "REVEAL_GAP_S", 0.0)
+    assert miner.cmd_commit(_commit_args()) == 1
+    captured = capsys.readouterr()
+    assert len(tries) == miner.REVEAL_TRIES
+    assert "attune miner reveal --repo me/mine" in captured.err
+    assert json.loads(captured.out)["revealed"] is False
+
+
+def test_a_reveal_that_fails_once_is_tried_again(monkeypatch):
+    from robotensor import hub, miner
+
+    tries = []
+
+    def flaky(repo, token=None):
+        tries.append(repo)
+        if len(tries) == 1:
+            raise OSError("no network")
+
+    _committing(monkeypatch, [])
+    monkeypatch.setattr(hub, "reveal", flaky)
+    monkeypatch.setattr(miner, "REVEAL_GAP_S", 0.0)
+    assert miner.cmd_commit(_commit_args()) == 0 and len(tries) == 2
+
+
+def test_init_s_next_steps_give_commit_everything_it_requires():
+    from robotensor.init import MINER_NEXT
+
+    assert "--digest" in MINER_NEXT
+
+
+# -- the Hub account a validator starts on ---------------------------------------------------------
+
+

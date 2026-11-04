@@ -9,8 +9,8 @@
 #
 #   KING=owner/name@<sha> CHALLENGER=owner/name@<sha> bash scripts/rehearsal.sh
 #
-# Needs config/localnet.toml's environments (simulator, policy) and HF_TOKEN: the validator account's, which the two repos must be gated to (or uploaded with --no-gate).
-# A duel (160 units a side) takes hours on one GPU; the genesis (one side) about half as long.
+# Needs config/localnet.toml's environments (simulator, policy) and HF_TOKEN: a permitted validator account's, which the two repos are gated to.
+# A duel (240 units a side) takes hours on one GPU; the genesis (one side) about half as long.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 PY=${PY:-/root/robotensor/.venvs/subnet/bin/python}

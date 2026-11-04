@@ -11,9 +11,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .config import ENV_FILE
-
 CONFIG = "attune.toml"
+#: The file beside a config whose `KEY=VALUE` lines go into the environment (secrets: HF_TOKEN).
+#: Here and not in `config`, which the miner's package does not hold.
+ENV_FILE = ".env"
 
 VALIDATOR_TOML = """\
 # Written by `attune init`. State, stores and runs are kept in var/ beside this file.
@@ -52,10 +53,12 @@ A submission is weights and nothing else. Three commands, in this order:
     attune miner check  --dir {directory}/submission
     attune miner upload --dir {directory}/submission --repo <you>/<name>
     attune miner commit --repo <you>/<name> --revision <the sha upload printed> \\
+        --digest <the digest upload printed> \\
         --netuid <N> --network test --wallet.name <w> --wallet.hotkey <h>
 
-`upload` gates the repository and lets the validator's account in before uploading: nobody else
-can take your weights. Keep the repository that way until the validator has downloaded it, which
+`upload` makes the repository private and gated, and lets the permitted validator accounts in
+before uploading. `commit` takes it out of private once the chain has your commitment, gated still:
+nobody else can take your weights. Keep it that way until the validator has downloaded it, which
 happens when its turn comes.
 
 This subnet charges nothing to submit.

@@ -140,7 +140,7 @@ class VectorLane:
         self._lock = threading.RLock()
         #: Whether this process has seen the mirror hold the store (`_seed`).
         self._seeded = False
-        self.kings = kings_.Kings(cfg.kings, cfg.kings_repo, token=hub_token)
+        self.kings = kings_.Kings(cfg.kings, cfg.kings_repo, owner=cfg.kings_owner, token=hub_token)
 
     # -- the lane engine, built once --------------------------------------------------------
 

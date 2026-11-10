@@ -13,6 +13,7 @@
     kings_repo = "vector-kings"          # optional: the public model repo the four kings are
                                          # mirrored to; "" for none
                                          # both are names, under the account HF_TOKEN belongs to
+    kings_owner = "robotensor"           # optional: the account kings_repo is under instead
     workers = 1                          # optional: units at once on each GPU, for its memory
     start_block = 4000000                # commitments made before this block are ignored; a
                                          # local chain may leave it out (0)
@@ -82,6 +83,8 @@ class VectorConfig(LaneConfig):
     #: The name of the public Hugging Face model repository the four kings' weights are mirrored
     #: to, under the account HF_TOKEN belongs to; empty keeps them on this host alone.
     kings_repo: str = ""
+    #: The account (an organisation HF_TOKEN may write to) `kings_repo` is under instead.
+    kings_owner: str = ""
     store: Path = Path()
     #: Where the four kings' weights are kept (`kings.Kings`): a directory of their own.
     kings: Path = Path()
@@ -97,8 +100,8 @@ class VectorConfig(LaneConfig):
 
 
 VECTOR_KEYS = (
-    "policy_python", "simulator_python", "simulator_root", "mirror", "kings_repo", "workers",
-    "start_block",
+    "policy_python", "simulator_python", "simulator_root", "mirror", "kings_repo", "kings_owner",
+    "workers", "start_block",
 )  # fmt: skip
 
 
@@ -208,6 +211,7 @@ def _vector(
         simulator_root=str(_path(root, table["simulator_root"])),
         mirror=repos["mirror"],
         kings_repo=repos["kings_repo"],
+        kings_owner=str(table.get("kings_owner", "")),
         workers=workers,
         start_block=start_block,
         store=data / "vector" / "store",

@@ -1069,6 +1069,34 @@ def test_the_kings_repository_is_made_under_the_token_s_account_and_again_on_a_n
     assert created == ["alice/vector-kings", "bob/vector-kings"]
 
 
+def test_a_kings_owner_puts_the_repository_under_it_whatever_the_token_s_account(lane, tmp_path):
+    from dataclasses import replace
+
+    from robotensor.kings import Kings
+
+    created = []
+
+    class Api:
+        def whoami(self):
+            pytest.fail("the token's account was asked")
+
+        def create_repo(self, repo, **kw):
+            created.append(repo)
+
+        def model_info(self, repo, files_metadata=None):
+            return listing([])
+
+        def create_commit(self, repo, operations, commit_message, repo_type=None):
+            pass
+
+    (tmp_path / "w").write_text("weights")
+    kings = Kings(tmp_path / "own", "vector-kings", owner="robotensor", api=Api())
+    kings.keep([{"key": "a", "repo": "m/a", "revision": "1" * 40}], lambda m: tmp_path / "w")
+    assert kings.publish() is True and created == ["robotensor/vector-kings"]
+    cfg = replace(lane.cfg, kings_repo="vector-kings", kings_owner="robotensor")
+    assert VectorLane(cfg, lane.state).kings.repo == "robotensor/vector-kings"
+
+
 def test_a_kings_repository_with_an_owner_is_refused(tmp_path):
     from robotensor.kings import Kings
 

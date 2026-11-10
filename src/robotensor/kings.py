@@ -55,7 +55,13 @@ FOLDER_FILES = frozenset({WEIGHTS_FILE, f"{WEIGHTS_FILE}.partial"})
 
 class Kings:
     def __init__(
-        self, root: str | Path, repo: str = "", *, token: str | None = None, api: Any = None
+        self,
+        root: str | Path,
+        repo: str = "",
+        *,
+        owner: str = "",
+        token: str | None = None,
+        api: Any = None,
     ) -> None:
         self.root = Path(root)
         if not self.root.is_absolute() or self.root == Path("/"):
@@ -63,6 +69,7 @@ class Kings:
         if "/" in repo:
             raise ValueError(f"the kings repository is a name, not owner/name: {repo!r}")
         self.name = repo
+        self.owner = owner
         self.token = token
         self._api = api
         self._repo: str | None = None
@@ -82,9 +89,10 @@ class Kings:
 
     @property
     def repo(self) -> str:
-        """The repository's id: its name under the account the token belongs to, asked once."""
+        """The repository's id: its name under `owner`, else the account the token belongs to,
+        asked once."""
         if self._repo is None:
-            self._repo = f"{account(api=self.api)}/{self.name}"
+            self._repo = f"{self.owner or account(api=self.api)}/{self.name}"
         return self._repo
 
     def path(self, key: str) -> Path:

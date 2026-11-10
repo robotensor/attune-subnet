@@ -134,6 +134,12 @@ def test_kings_repo_and_mirror_are_names_and_may_be_turned_off(tmp_path):
     assert (cfg.vector.kings_repo, cfg.vector.mirror) == ("", "mine")
 
 
+def test_kings_owner_is_optional(tmp_path):
+    assert load(write(tmp_path, GOOD)).vector.kings_owner == ""
+    text = GOOD.replace("[vector]\n", '[vector]\nkings_owner = "robotensor"\n')
+    assert load(write(tmp_path, text)).vector.kings_owner == "robotensor"
+
+
 @pytest.mark.parametrize("key", ["kings_repo", "mirror"])
 def test_a_repository_with_an_owner_is_refused(tmp_path, key):
     text = GOOD.replace("[vector]\n", f'[vector]\n{key} = "someone/name"\n')

@@ -36,7 +36,7 @@ demonstration of a task and must complete the same task in a different scene.
 |---|---|
 | **Submission** | A Hugging Face model repo containing only `model.safetensors` (and an optional README). |
 | **Commitment** | `vector:<owner>/<repo>@<commit>.<digest>` on chain: the revision and the sha256 of `model.safetensors`, in base64url. `attune miner commit` builds it; repo ids can be up to 49 characters long. |
-| **Queue** | The validator queues a commitment as soon as it reads it from the chain, oldest first. **One submission per hotkey**: once a hotkey is queued, its later commitments are refused. |
+| **Queue** | The validator queues a commitment as soon as it reads it from the chain, oldest first. **One submission per registration**: a UID's first commitment after it was registered is its only one, and every later one is refused. A hotkey swap does not reset it; registering again does. The validator reads this from the chain's history (an archive node), not from its own state. |
 | **Scoring** | King of the hill. Each queued submission duels the current king on 240 units (16 tasks × 15), seeded from the finalized block when the duel starts. That block must come after the commitment. The challenger takes the crown when its average success rate beats the king's by 3+ points. |
 | **Rewards** | The lane's share (30% of miner emission) goes to the 4 most recent champions: 40% / 30% / 20% / 10%, newest first. |
 

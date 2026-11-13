@@ -53,7 +53,7 @@ def build(cfg: Config, name: str, state: State) -> Lane:
 
 def one_step(lane: Lane, chain: chain_.Chain, broker: compute.Broker) -> Progress:
     """Intake, then one piece of the lane's own work, with the cards it is allowed for it."""
-    changed = lane.intake(chain.commitments(), chain.block())
+    changed = lane.intake(lane.commitments(chain), chain.block())
     for entry in changed:
         log.info("intake: %s from %s is %s", entry.entry, entry.hotkey, entry.status)
     with broker.lease(lane.name) as lease, compute.applied(lease):

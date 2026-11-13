@@ -154,7 +154,7 @@ def cmd_intake(args: argparse.Namespace, cfg: Config) -> int:
     state = State(cfg.state)
     vector = lane(cfg, state)
     chain = chain_.Chain(cfg.network, cfg.netuid)
-    changed = vector.intake(chain.commitments(), chain.block())
+    changed = vector.intake(vector.commitments(chain), chain.block())
     print(json.dumps([e.__dict__ for e in changed], indent=1))
     print(json.dumps([e.__dict__ for e in vector.queue()], indent=1))
     return 0

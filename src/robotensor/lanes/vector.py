@@ -7,12 +7,18 @@ the benchmark is the RoboTwin-Vector checkout; the model code is `vector_runtime
 **Intake.** Every `vector:` commitment on chain is read with the block it was made at: a repository,
 a revision and the sha256 of its weights (`protocol.commitment`). A new one is `queued` at once:
 nothing is asked of the Hub until its turn comes. One made before the configured `start_block` is
-not read at all: it is left unrecorded, so it neither enters nor spends its hotkey's submission,
-and the hotkey enters by committing again from that block on.
+not read at all: it is left unrecorded, so it neither enters nor spends a submission, and the miner
+enters by committing again from that block on.
 
-**One submission per hotkey.** A hotkey's first commitment to reach the queue is its only one: from
-then on, whatever it commits is `refused` - while that entry waits, during its duel, and after it,
-whatever became of it. Queued is spent, as one reveal is one shot.
+**One submission per registration.** A UID, from the block it was registered at, makes one
+submission: its first commitment from then on (`protocol.slots`), which spends the shot even when it
+is not a Vector one. Every other is `refused` -
+while that entry waits, during its duel, and after it, whatever became of it. Queued is spent, as
+one reveal is one shot. A hotkey swap keeps the registration, so the new hotkey is refused too;
+registering again is a new one. The chain says which commitment is the one (`chain.submissions`
+finds it on an archive node in a bounded number of reads, however often a miner commits), so a
+validator starting with no state and no mirror takes the same one; the entries this lane keeps
+refuse a second as well.
 
 **Duels.** The queue is served oldest commitment first. Each duel is seeded from the chain's
 finalized head, which must come after the challenger's commitment (`protocol.seed`). Then, and only
@@ -319,6 +325,9 @@ class VectorLane:
             # `pending` is what an older build left waiting for the Hub; it is queued like a new one.
             if key in entries and entries[key]["status"] != PENDING:
                 continue
+            # What makes one submission: the registration it was made from, read from the chain
+            # (`chain.submissions`), or the hotkey where it was read without one.
+            slot = getattr(c, "slot", None)
             record = {
                 "hotkey": c.hotkey,
                 "repo": sub.repo,
@@ -329,17 +338,21 @@ class VectorLane:
                 "reason": "",
                 "submitted": True,
             }
+            if slot:
+                record["slot"] = slot
             if published is None:
                 published = self._published()
-            spent = self._submission_of(c.hotkey, besides=key)
+            spent = self._submission_of(slot or c.hotkey, besides=key)
             if key in published:
                 # The store duelled it before this lane's state knew of it: a state lost with the
                 # host that kept it. It is not queued again.
                 record.update(status=published[key], reason="published before this state knew it")
-            elif spent is not None:
+            elif not getattr(c, "submission", True) or spent is not None:
+                whose = f"registration {slot}" if slot else "hotkey"
                 record.update(
                     status="refused",
-                    reason=f"this hotkey has made its one submission ({spent})",
+                    reason=f"this {whose} has made its one submission"
+                    + (f" ({spent})" if spent else ", earlier on chain"),
                     submitted=False,
                 )
             entries[key] = record
@@ -379,11 +392,12 @@ class VectorLane:
                 out[key] = status
         return out
 
-    def _submission_of(self, hotkey: str, *, besides: str) -> str | None:
-        """The key of the submission `hotkey` has made, other than `besides`: an entry that reached
-        the queue, whatever became of it. None while the hotkey has made none."""
+    def _submission_of(self, who: str, *, besides: str) -> str | None:
+        """The key of the submission `who` (a registration's slot, or a hotkey) has made, other
+        than `besides`: an entry that reached the queue, whatever became of it. None while it has
+        made none."""
         for key, record in self.state.lane(LANE)["entries"].items():
-            if key == besides or record["hotkey"] != hotkey:
+            if key == besides or (record.get("slot") or record["hotkey"]) != who:
                 continue
             if record.get("submitted") or record["status"] in SUBMITTED:
                 return key
@@ -403,11 +417,17 @@ class VectorLane:
         waiting.sort(key=lambda w: (w[0], w[1].commit_block, w[1].hotkey))
         return [entry for _, entry in waiting]
 
+    def commitments(self, chain: Any) -> list[Commitment]:
+        """What intake reads: the chain's Vector commitments from `start_block` on, each marked
+        whether it is its registration's one submission. What the chain's past said is kept
+        beside the store, to be read again from the chain if it is lost."""
+        return chain.submissions(self.cfg.start_block, cache=first_commitments_path(self.cfg))
+
     def refresh(self, chain: Any) -> list[Entry]:
         """Intake and the queue republished: what the worker runs beside a duel, so a commitment
         made while one runs is in the queue the dashboard shows within the minute rather than
         after the duel. The entries that changed."""
-        changed = self.intake(chain.commitments(), chain.block())
+        changed = self.intake(self.commitments(chain), chain.block())
         self.publish_queue(self.queue())
         return changed
 
@@ -853,6 +873,11 @@ class VectorLane:
             commit_block=int(record["commit_block"]),
             status=str(record["status"]),
         )
+
+
+def first_commitments_path(cfg: VectorConfig) -> Path:
+    """Where `chain.submissions` keeps what it found of the chain's past: a cache, not a record."""
+    return cfg.store.parent / "first_commitments.json"
 
 
 def store_path(cfg: VectorConfig) -> Path:

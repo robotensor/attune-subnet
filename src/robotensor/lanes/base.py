@@ -83,6 +83,9 @@ class Lane(Protocol):
     #: The name the chain's commitments carry and the config's `[<name>]` table uses.
     name: str
 
+    def commitments(self, chain: Any) -> Sequence[Any]:
+        """What `intake` reads from the chain."""
+
     def intake(self, commitments: Sequence[Any], block: int, *, api: Any = None) -> list[Any]:
         """Take every commitment of this lane into it; the entries that changed."""
 

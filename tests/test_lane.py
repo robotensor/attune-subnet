@@ -208,6 +208,36 @@ def test_the_one_submission_stays_spent_after_its_duel_won_or_lost(lane):
         del lane.state.lane("vector")["entries"][again.key]
 
 
+def in_slot(commitment, slot, submission=True):
+    return dataclasses.replace(commitment, slot=slot, submission=submission)
+
+
+def test_a_commitment_the_chain_says_is_not_its_registrations_submission_is_refused(lane):
+    """A validator starting with no state: the chain's history says which one is the shot."""
+    (later,) = lane.intake([in_slot(c("hk1", "m/one", B, 40), "3@5", submission=False)], 50)
+    assert later.status == "refused"
+    assert "registration 3@5 has made its one submission" in later_reason(lane, later)
+    assert lane.queue() == []
+
+
+def test_a_swapped_in_hotkey_shares_its_registrations_one_submission(lane):
+    lane.intake([in_slot(c("hk1", "m/one", A, 10), "3@5")], 30)
+    (later,) = lane.intake([in_slot(c("hk2", "m/two", B, 40), "3@5")], 50)
+    assert later.status == "refused" and "(" in later_reason(lane, later)
+    assert [e.hotkey for e in lane.queue()] == ["hk1"]
+
+
+def test_a_hotkey_registered_again_makes_a_new_submission(lane):
+    lane.intake([in_slot(c("hk1", "m/one", A, 10), "3@5")], 30)
+    (again,) = lane.intake([in_slot(c("hk1", "m/one", B, 40), "3@35")], 50)
+    assert again.status == "queued"
+    assert [e.revision for e in lane.queue()] == [A, B]
+
+
+def later_reason(lane, entry):
+    return lane.state.lane("vector")["entries"][entry.key]["reason"]
+
+
 def test_a_settled_entry_is_not_taken_in_again(lane):
     hub = FakeHub({f"m/one@{A}": {"model.safetensors": "w1"}})
     lane.intake([c("hk1", "m/one", A, 10)], 30, api=hub)
@@ -406,7 +436,7 @@ def test_a_refresh_takes_new_commitments_in_and_republishes_the_queue(lane, monk
     monkeypatch.setattr(hub, "inspect", lambda *a, **kw: real(*a, **{**kw, "api": fake}))
 
     class Chain:
-        def commitments(self):
+        def submissions(self, start_block, cache=None):
             return [c("hk1", "m/one", A, 10)]
 
         def block(self):

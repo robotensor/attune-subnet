@@ -29,6 +29,8 @@ A key this build does not know is refused, with its name.
 Secrets are not in the TOML: a `.env` beside it (`KEY=VALUE` lines, `#` comments) is read by
 `load` into the environment for whatever is not already set there, so `HF_TOKEN=hf_...` in
 `config/.env` serves the validator and its workers alike; a variable already exported wins.
+`SUBTENSOR_ARCHIVE=wss://...` there names the archive node the chain's past is read from (by
+default finney's public one, and any other network's own endpoint).
 """
 
 from __future__ import annotations
